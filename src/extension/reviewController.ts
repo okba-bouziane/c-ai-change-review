@@ -1,17 +1,34 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { relativeTo } from '../core/paths';
-import type { DetectedChange, SessionData } from '../core/session';
-import type { ChangedFile } from '../core/types';
+import type { Baseline, DetectedChange, ReviewRecord, SessionData } from '../core/session';
+import type { ChangedFile, ReviewStatus } from '../core/types';
 import { captureBaseline } from '../services/baseline';
 import { ChangeTracker } from '../services/changeTracker';
 import { isAbort } from '../services/fileState';
 import { Git } from '../services/git';
+import { readBaselineBytes } from '../services/restore';
+import {
+  acceptChange,
+  rejectChange,
+  type AcceptResult,
+  type RejectOutcome,
+} from '../services/review';
 import type { SessionStore } from '../storage/sessionStore';
 import type { SnapshotStore } from '../storage/snapshotStore';
 import { readConfig, SECTION } from './config';
 
 const REFRESH_DEBOUNCE_MS = 300;
+
+/** Everything known about one entry in the panel, keyed by root-relative path. */
+export interface ReviewItem {
+  readonly key: string;
+  readonly status: ReviewStatus;
+  /** The pending change, when status is 'pending'. */
+  readonly change?: DetectedChange;
+  /** The decision, when status is 'accepted' or 'rejected'. */
+  readonly record?: ReviewRecord;
+}
 
 export interface ControllerDeps {
   readonly folder: vscode.WorkspaceFolder;
@@ -35,7 +52,10 @@ export class ReviewController implements vscode.Disposable {
   private readonly disposables: vscode.Disposable[] = [this.changeEmitter];
   private session: SessionData | undefined;
   private tracker: ChangeTracker | undefined;
+  private git: Git | undefined;
   private changes: DetectedChange[] = [];
+  /** Serializes accept/reject so two decisions never interleave. */
+  private actionQueue: Promise<unknown> = Promise.resolve();
 
   private debounceTimer: NodeJS.Timeout | undefined;
   private pendingHints = new Set<string>();
@@ -72,6 +92,107 @@ export class ReviewController implements vscode.Disposable {
 
   get detectedChanges(): readonly DetectedChange[] {
     return this.changes;
+  }
+
+  /** The panel entry for a root-relative path, if there is one. */
+  item(key: string): ReviewItem | undefined {
+    const change = this.changes.find((c) => c.path === key);
+    if (change) {
+      return { key, status: 'pending', change };
+    }
+    const record = this.session?.reviews[key];
+    return record ? { key, status: record.status, record } : undefined;
+  }
+
+  /** Root-relative key for a file URI in this session, if it is inside the session root. */
+  keyForFile(fsPath: string): string | undefined {
+    return this.session ? relativeTo(this.session.root, fsPath) : undefined;
+  }
+
+  /** Absolute path of a root-relative key. */
+  absolutePath(key: string): string | undefined {
+    return this.session ? path.join(this.session.root, key) : undefined;
+  }
+
+  /** Reads a baseline's bytes for display. Undefined for 'absent'. */
+  async readBaseline(baseline: Baseline, key: string): Promise<Buffer | undefined> {
+    return readBaselineBytes(baseline, key, this.deps.snapshots, this.git);
+  }
+
+  /** Accepts the pending change for key. The workspace is never modified. */
+  async accept(key: string): Promise<AcceptResult | undefined> {
+    return this.enqueue(async () => {
+      const change = this.changes.find((c) => c.path === key);
+      const session = this.session;
+      if (!change || !session) {
+        return undefined;
+      }
+      const config = readConfig(this.deps.folder);
+      const result = await acceptChange(change, {
+        session,
+        store: this.deps.snapshots,
+        sensitive: config.sensitive,
+        limits: config.limits,
+      });
+      if (result.ok) {
+        this.deps.log.info(`Accepted ${change.kind} ${key}`);
+        await this.deps.sessions.save(session);
+      } else {
+        this.deps.log.warn(`Could not accept ${key}: ${result.message}`);
+      }
+      await this.refresh();
+      return result;
+    });
+  }
+
+  /** Rejects the pending change for key by restoring its baseline. */
+  async reject(key: string): Promise<RejectOutcome | undefined> {
+    return this.enqueue(async () => {
+      const change = this.changes.find((c) => c.path === key);
+      const session = this.session;
+      if (!change || !session) {
+        return undefined;
+      }
+      const outcome = await rejectChange(change, {
+        session,
+        store: this.deps.snapshots,
+        git: this.git,
+        removeFile: moveToTrash,
+      });
+      for (const r of outcome.results) {
+        const line = `Reject ${r.path}: ${r.outcome}${r.message ? ` (${r.message})` : ''}`;
+        if (r.outcome === 'failed' || r.outcome === 'blocked' || r.outcome === 'conflict') {
+          this.deps.log.warn(line);
+        } else {
+          this.deps.log.info(line);
+        }
+      }
+      if (outcome.record) {
+        await this.deps.sessions.save(session);
+      } else {
+        session.log.push({
+          at: new Date().toISOString(),
+          level: 'warning',
+          path: key,
+          message: outcome.results.map((r) => `${r.path}: ${r.outcome}`).join(', '),
+        });
+        await this.deps.sessions.save(session);
+      }
+      for (const r of outcome.results) {
+        const abs = this.absolutePath(r.path);
+        if (abs) {
+          this.tracker?.invalidate(abs);
+        }
+      }
+      await this.refresh();
+      return outcome;
+    });
+  }
+
+  private enqueue<T>(action: () => Promise<T>): Promise<T> {
+    const next = this.actionQueue.then(action, action);
+    this.actionQueue = next.catch(() => undefined);
+    return next;
   }
 
   /** Loads the persisted session, or starts one when automatic tracking is enabled. */
@@ -144,6 +265,7 @@ export class ReviewController implements vscode.Disposable {
     const config = readConfig(this.deps.folder);
     const git = session.mode === 'git' ? new Git(session.root, this.deps.gitPath) : undefined;
     this.session = session;
+    this.git = git;
     this.tracker = new ChangeTracker(session, git, config.exclude, config.limits);
     this.changes = [];
     await this.refresh({ full: true });
@@ -190,7 +312,7 @@ export class ReviewController implements vscode.Disposable {
         if (result.baselinesChanged) {
           await this.deps.sessions.save(session);
         }
-        this.changeEmitter.fire(this.toChangedFiles(result.changes));
+        this.changeEmitter.fire(this.toChangedFiles());
       } catch (e) {
         if (!isAbort(e)) {
           this.deps.log.error(
@@ -206,20 +328,48 @@ export class ReviewController implements vscode.Disposable {
     }
   }
 
-  private toChangedFiles(changes: readonly DetectedChange[]): ChangedFile[] {
+  /** Current panel entries: pending changes plus decided ones that have not changed since. */
+  changedFiles(): ChangedFile[] {
+    return this.toChangedFiles();
+  }
+
+  private toChangedFiles(): ChangedFile[] {
     const session = this.session;
     if (!session) {
       return [];
     }
     const toWorkspace = (p: string): string =>
       relativeTo(session.workspaceFolder, path.join(session.root, p)) ?? p;
-    return changes.map((c) => ({
-      path: toWorkspace(c.path),
-      kind: c.kind,
-      status: 'pending',
-      ...(c.oldPath !== undefined ? { oldPath: toWorkspace(c.oldPath) } : {}),
-      ...(c.restoreBlocker !== undefined ? { restoreBlocker: c.restoreBlocker } : {}),
-    }));
+    const files: ChangedFile[] = [];
+    const pendingPaths = new Set<string>();
+    for (const c of this.changes) {
+      pendingPaths.add(c.path);
+      if (c.oldPath !== undefined) {
+        pendingPaths.add(c.oldPath);
+      }
+      files.push({
+        key: c.path,
+        path: toWorkspace(c.path),
+        kind: c.kind,
+        status: 'pending',
+        ...(c.oldPath !== undefined ? { oldPath: toWorkspace(c.oldPath) } : {}),
+        ...(c.restoreBlocker !== undefined ? { restoreBlocker: c.restoreBlocker } : {}),
+      });
+    }
+    for (const [key, record] of Object.entries(session.reviews)) {
+      // A decided file that changed again is shown once, as pending.
+      if (pendingPaths.has(key)) {
+        continue;
+      }
+      files.push({
+        key,
+        path: toWorkspace(key),
+        kind: record.kind,
+        status: record.status,
+        ...(record.oldPath !== undefined ? { oldPath: toWorkspace(record.oldPath) } : {}),
+      });
+    }
+    return files;
   }
 
   private cancelRunning(): void {
@@ -240,5 +390,15 @@ export class ReviewController implements vscode.Disposable {
     this.disposables.forEach((d) => {
       d.dispose();
     });
+  }
+}
+
+/** Moves a file to the OS trash, falling back to deletion (its bytes are already backed up). */
+async function moveToTrash(abs: string): Promise<void> {
+  const uri = vscode.Uri.file(abs);
+  try {
+    await vscode.workspace.fs.delete(uri, { useTrash: true });
+  } catch {
+    await vscode.workspace.fs.delete(uri, { useTrash: false });
   }
 }

@@ -6,6 +6,8 @@ export const SECTION = 'claudeReview';
 
 export interface ReviewConfig {
   readonly autoTrack: boolean;
+  readonly confirmReject: boolean;
+  readonly openNextAfterDecision: boolean;
   readonly exclude: GlobSet;
   readonly sensitive: GlobSet;
   readonly limits: CaptureLimits;
@@ -17,6 +19,8 @@ export function readConfig(scope?: vscode.ConfigurationScope): ReviewConfig {
   const c = vscode.workspace.getConfiguration(SECTION, scope);
   return {
     autoTrack: c.get<boolean>('autoTrack', true),
+    confirmReject: c.get<boolean>('confirmReject', true),
+    openNextAfterDecision: c.get<boolean>('openNextAfterDecision', true),
     exclude: new GlobSet(c.get<string[]>('exclude', [])),
     sensitive: new GlobSet(c.get<string[]>('snapshot.sensitivePatterns', [])),
     limits: {

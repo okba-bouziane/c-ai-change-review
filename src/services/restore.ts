@@ -173,20 +173,37 @@ async function loadBaseline(
   deps: RestoreDeps,
 ): Promise<{ content: Buffer; mode: number } | undefined> {
   const b = plan.baseline;
+  const content = await readBaselineBytes(b, plan.path, deps.store, deps.git);
+  if (content === undefined || b.type === 'absent' || b.type === 'unavailable') {
+    return undefined;
+  }
+  return { content, mode: b.mode };
+}
+
+/**
+ * The exact bytes of a baseline, verified against its recorded hash.
+ * Returns undefined for 'absent'; throws for 'unavailable' or when verification fails.
+ */
+export async function readBaselineBytes(
+  b: Baseline,
+  relPath: string,
+  store: SnapshotStore,
+  git: Git | undefined,
+): Promise<Buffer | undefined> {
   switch (b.type) {
     case 'absent':
       return undefined;
     case 'stored':
-      return { content: await deps.store.get(b.hash), mode: b.mode };
+      return store.get(b.hash);
     case 'git': {
-      if (!deps.git) {
+      if (!git) {
         throw new Error('Git is not available');
       }
-      const content = await deps.git.readBlobFiltered(b.blob, plan.path);
+      const content = await git.readBlobFiltered(b.blob, relPath);
       if (b.hash !== undefined && sha256(content) !== b.hash) {
         throw new Error('Git returned different content than was recorded at the baseline');
       }
-      return { content, mode: b.mode };
+      return content;
     }
     case 'unavailable':
       throw new Error(b.reason);

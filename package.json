@@ -80,10 +80,56 @@
         "title": "Show Log",
         "category": "Claude Review",
         "icon": "$(output)"
+      },
+      {
+        "command": "claudeReview.openDiff",
+        "title": "Review File\u2026",
+        "category": "Claude Review",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "claudeReview.reviewNext",
+        "title": "Review Next Pending File",
+        "category": "Claude Review",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "claudeReview.acceptFile",
+        "title": "Accept Change",
+        "category": "Claude Review",
+        "icon": "$(check)"
+      },
+      {
+        "command": "claudeReview.rejectFile",
+        "title": "Reject Change",
+        "category": "Claude Review",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "claudeReview.openFile",
+        "title": "Open File",
+        "category": "Claude Review",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "claudeReview.filter",
+        "title": "Filter by Review Status\u2026",
+        "category": "Claude Review",
+        "icon": "$(filter)"
       }
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "claudeReview.reviewNext",
+          "when": "view == claudeReview.changes",
+          "group": "navigation@1"
+        },
+        {
+          "command": "claudeReview.filter",
+          "when": "view == claudeReview.changes",
+          "group": "navigation@2"
+        },
         {
           "command": "claudeReview.refresh",
           "when": "view == claudeReview.changes",
@@ -98,6 +144,74 @@
           "command": "claudeReview.showLog",
           "when": "view == claudeReview.changes",
           "group": "z_more@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "claudeReview.openFile",
+          "when": "view == claudeReview.changes && viewItem =~ /^file\\./",
+          "group": "inline@0"
+        },
+        {
+          "command": "claudeReview.acceptFile",
+          "when": "view == claudeReview.changes && viewItem =~ /^file\\.[a-z]+\\.pending/",
+          "group": "inline@1"
+        },
+        {
+          "command": "claudeReview.rejectFile",
+          "when": "view == claudeReview.changes && viewItem =~ /^file\\.[a-z]+\\.pending$/",
+          "group": "inline@2"
+        },
+        {
+          "command": "claudeReview.openDiff",
+          "when": "view == claudeReview.changes && viewItem =~ /^file\\./",
+          "group": "1_review@0"
+        },
+        {
+          "command": "claudeReview.openFile",
+          "when": "view == claudeReview.changes && viewItem =~ /^file\\./",
+          "group": "1_review@1"
+        },
+        {
+          "command": "claudeReview.acceptFile",
+          "when": "view == claudeReview.changes && viewItem =~ /^file\\.[a-z]+\\.pending/",
+          "group": "2_decide@0"
+        },
+        {
+          "command": "claudeReview.rejectFile",
+          "when": "view == claudeReview.changes && viewItem =~ /^file\\.[a-z]+\\.pending$/",
+          "group": "2_decide@1"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "claudeReview.acceptFile",
+          "when": "claudeReview.inReviewDiff && claudeReview.activeReviewStatus == pending",
+          "group": "navigation@-2"
+        },
+        {
+          "command": "claudeReview.rejectFile",
+          "when": "claudeReview.inReviewDiff && claudeReview.activeReviewStatus == pending",
+          "group": "navigation@-1"
+        },
+        {
+          "command": "claudeReview.reviewNext",
+          "when": "claudeReview.inReviewDiff",
+          "group": "navigation@-0"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "claudeReview.acceptFile",
+          "when": "claudeReview.inReviewDiff && claudeReview.activeReviewStatus == pending"
+        },
+        {
+          "command": "claudeReview.rejectFile",
+          "when": "claudeReview.inReviewDiff && claudeReview.activeReviewStatus == pending"
+        },
+        {
+          "command": "claudeReview.openFile",
+          "when": "false"
         }
       ]
     },
@@ -158,6 +272,16 @@
           "default": 20000,
           "minimum": 1,
           "markdownDescription": "Outside Git repositories every file must be copied at session start. Workspaces with more files than this are not tracked."
+        },
+        "claudeReview.confirmReject": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Ask for confirmation before rejecting a single file. Rejecting restores the file's original content (or deletes a file that did not exist); a copy of the rejected content is always kept in extension storage."
+        },
+        "claudeReview.openNextAfterDecision": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "After accepting or rejecting from a diff editor, close it and open the next pending file."
         }
       }
     }

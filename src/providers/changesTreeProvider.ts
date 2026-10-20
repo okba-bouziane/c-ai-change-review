@@ -1,5 +1,12 @@
 import * as vscode from 'vscode';
-import { countByStatus, groupChanges, splitPath, type ChangeGroup } from '../core/grouping';
+import {
+  ALL_STATUSES,
+  countByStatus,
+  groupChanges,
+  splitPath,
+  type ChangeGroup,
+  type StatusFilter,
+} from '../core/grouping';
 import {
   CHANGE_KIND_LABEL,
   REVIEW_STATUS_LABEL,
@@ -31,6 +38,9 @@ const KIND_ICON: Readonly<Record<ChangeKind, vscode.ThemeIcon>> = {
   ),
 };
 
+const ACCEPTED_ICON = new vscode.ThemeIcon('pass', new vscode.ThemeColor('testing.iconPassed'));
+const REJECTED_ICON = new vscode.ThemeIcon('discard', new vscode.ThemeColor('disabledForeground'));
+
 const STATUS_ICON: Readonly<Record<ReviewStatus, string>> = {
   pending: '$(circle-filled)',
   accepted: '$(check)',
@@ -46,6 +56,7 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeNode>,
   readonly onDidChangeTreeData = this.changeEmitter.event;
 
   private files: readonly ChangedFile[] = [];
+  private filter: StatusFilter = ALL_STATUSES;
 
   constructor(private readonly workspaceRoot: vscode.Uri | undefined) {}
 
@@ -58,6 +69,19 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeNode>,
     return this.files;
   }
 
+  getFilter(): StatusFilter {
+    return this.filter;
+  }
+
+  setFilter(filter: StatusFilter): void {
+    this.filter = filter;
+    this.changeEmitter.fire(undefined);
+  }
+
+  isFiltered(): boolean {
+    return this.filter.size < ALL_STATUSES.size;
+  }
+
   /** Text for the view's description, e.g. "3 files · 2 pending". Empty when there is nothing. */
   describe(): string {
     if (this.files.length === 0) {
@@ -65,12 +89,13 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeNode>,
     }
     const { pending } = countByStatus(this.files);
     const total = `${this.files.length} ${this.files.length === 1 ? 'file' : 'files'}`;
-    return pending > 0 ? `${total} · ${pending} pending` : total;
+    const text = pending > 0 ? `${total} · ${pending} pending` : `${total} · all reviewed`;
+    return this.isFiltered() ? `${text} · filtered` : text;
   }
 
   getChildren(element?: ChangeNode): ChangeNode[] {
     if (!element) {
-      return groupChanges(this.files).map((group) => ({ type: 'group', group }));
+      return groupChanges(this.files, this.filter).map((group) => ({ type: 'group', group }));
     }
     if (element.type === 'group') {
       return element.group.files.map((file) => ({ type: 'file', file }));
@@ -99,12 +124,27 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeNode>,
     const item = new vscode.TreeItem(name, vscode.TreeItemCollapsibleState.None);
     item.id = `file:${file.path}`;
     if (this.workspaceRoot) {
-      // Lets the file icon theme pick the icon; a decoration provider will add the status badge.
+      // Lets theme file decorations (such as Git colors) apply to the label.
       item.resourceUri = vscode.Uri.joinPath(this.workspaceRoot, file.path);
     }
+    item.iconPath =
+      file.status === 'accepted'
+        ? ACCEPTED_ICON
+        : file.status === 'rejected'
+          ? REJECTED_ICON
+          : KIND_ICON[file.kind];
     const location = file.kind === 'renamed' && file.oldPath ? `← ${file.oldPath}` : dir;
-    item.description = [location, REVIEW_STATUS_LABEL[file.status]].filter(Boolean).join(' · ');
-    item.contextValue = `file.${file.kind}.${file.status}`;
+    const status =
+      file.restoreBlocker && file.status === 'pending'
+        ? 'Pending ⚠'
+        : REVIEW_STATUS_LABEL[file.status];
+    item.description = [location, status].filter(Boolean).join(' · ');
+    item.contextValue = `file.${file.kind}.${file.status}${file.restoreBlocker ? '.blocked' : ''}`;
+    item.command = {
+      command: 'claudeReview.openDiff',
+      title: 'Open Diff',
+      arguments: [file],
+    };
 
     const tooltip = new vscode.MarkdownString(undefined, true);
     tooltip.appendMarkdown(

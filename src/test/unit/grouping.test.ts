@@ -3,11 +3,17 @@ import { countByStatus, groupChanges, splitPath } from '../../core/grouping';
 import type { ChangedFile } from '../../core/types';
 
 const files: ChangedFile[] = [
-  { path: 'src/b.ts', kind: 'modified', status: 'pending' },
-  { path: 'README.md', kind: 'added', status: 'accepted' },
-  { path: 'src/a.ts', kind: 'modified', status: 'rejected' },
-  { path: 'lib/new.ts', oldPath: 'lib/old.ts', kind: 'renamed', status: 'pending' },
-  { path: 'gone.txt', kind: 'deleted', status: 'pending' },
+  { key: 'src/b.ts', path: 'src/b.ts', kind: 'modified', status: 'pending' },
+  { key: 'README.md', path: 'README.md', kind: 'added', status: 'accepted' },
+  { key: 'src/a.ts', path: 'src/a.ts', kind: 'modified', status: 'rejected' },
+  {
+    key: 'lib/new.ts',
+    path: 'lib/new.ts',
+    oldPath: 'lib/old.ts',
+    kind: 'renamed',
+    status: 'pending',
+  },
+  { key: 'gone.txt', path: 'gone.txt', kind: 'deleted', status: 'pending' },
 ];
 
 describe('groupChanges', () => {
@@ -35,6 +41,7 @@ describe('groupChanges', () => {
 
   it('handles 1000 files', () => {
     const many: ChangedFile[] = Array.from({ length: 1000 }, (_, i) => ({
+      key: `k${i}`,
       path: `pkg/file-${String(999 - i).padStart(4, '0')}.ts`,
       kind: 'modified',
       status: 'pending',

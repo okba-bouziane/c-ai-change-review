@@ -167,9 +167,10 @@ describe('SessionStore', () => {
       baselines: { 'a.ts': { type: 'absent' } },
       log: [],
     } as const;
-    await store.save({ ...session, baselines: { ...session.baselines }, log: [] });
+    // Written without `reviews`, like a session saved by an earlier version.
+    await store.save({ ...session, baselines: { ...session.baselines }, log: [] } as never);
     await store.setActive('abc-123');
-    expect(await store.loadActive()).toEqual(session);
+    expect(await store.loadActive()).toEqual({ ...session, reviews: {} });
     await expect(store.load('../evil')).rejects.toThrow(/Invalid session id/);
   });
 });

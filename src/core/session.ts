@@ -62,6 +62,30 @@ export interface SessionData {
   readonly baselines: Record<string, Baseline>;
   /** Problems worth surfacing later (capture skipped files, restore conflicts, ...). */
   readonly log: SessionLogEntry[];
+  /** Review decisions keyed by root-relative path (the new path for renames). */
+  readonly reviews: Record<string, ReviewRecord>;
+}
+
+/**
+ * A decision the user made about one change.
+ *
+ * Accepting moves the file's baseline forward to the accepted content, so later edits show
+ * up as a new pending change. Rejecting writes the baseline back and keeps a backup of the
+ * rejected content. `before`/`after` keep enough to show the decision as a diff and, later,
+ * to undo it.
+ */
+export interface ReviewRecord {
+  readonly status: 'accepted' | 'rejected';
+  readonly kind: ChangeKind;
+  readonly oldPath?: string;
+  readonly at: string;
+  /** The path's baseline before the decision (the original content). */
+  readonly before: Baseline;
+  /** Accepted: the new baseline. Rejected: backup of the content that was thrown away. */
+  readonly after: Baseline;
+  /** Same as before/after for the rename source path. */
+  readonly oldBefore?: Baseline;
+  readonly oldAfter?: Baseline;
 }
 
 export interface SessionLogEntry {

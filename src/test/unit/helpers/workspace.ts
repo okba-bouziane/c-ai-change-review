@@ -98,6 +98,10 @@ export class Harness {
     return h;
   }
 
+  get git(): Git | undefined {
+    return this.gitApi;
+  }
+
   get limits(): CaptureLimits {
     return { ...DEFAULT_LIMITS, ...this.options.limits };
   }

@@ -18,7 +18,12 @@ export class SessionStore {
 
   async load(id: string): Promise<SessionData | undefined> {
     const data = await readJson(this.sessionPath(id));
-    return isSessionData(data) ? data : undefined;
+    if (!isSessionData(data)) {
+      return undefined;
+    }
+    // Sessions written before review decisions existed have no `reviews` map.
+    const reviews = (data as Partial<SessionData>).reviews ?? {};
+    return { ...data, reviews };
   }
 
   async setActive(id: string | undefined): Promise<void> {

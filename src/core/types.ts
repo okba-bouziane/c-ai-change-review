@@ -6,6 +6,8 @@ export type ChangeKind = 'added' | 'modified' | 'deleted' | 'renamed';
 export type ReviewStatus = 'pending' | 'accepted' | 'rejected';
 
 export interface ChangedFile {
+  /** Stable identifier: the path relative to the session root (Git top-level or folder). */
+  readonly key: string;
   /** Workspace-relative path using forward slashes. For renames, the new path. */
   readonly path: string;
   /** For renames only: the workspace-relative path before the rename. */

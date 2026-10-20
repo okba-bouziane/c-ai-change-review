@@ -1,6 +1,8 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { registerReviewCommands } from '../commands/reviewCommands';
 import { ChangesTreeProvider } from '../providers/changesTreeProvider';
+import { REVIEW_SCHEME, ReviewContentProvider } from '../providers/reviewContentProvider';
 import { SessionStore } from '../storage/sessionStore';
 import { SnapshotStore } from '../storage/snapshotStore';
 import { ReviewController } from './reviewController';
@@ -64,6 +66,16 @@ export function activate(context: vscode.ExtensionContext): ClaudeReviewInternal
       }),
     );
   }
+
+  context.subscriptions.push(
+    vscode.workspace.registerTextDocumentContentProvider(
+      REVIEW_SCHEME,
+      new ReviewContentProvider(() =>
+        controller ? (b, key) => controller.readBaseline(b, key) : undefined,
+      ),
+    ),
+    ...registerReviewCommands(controller, changes),
+  );
 
   const ready = (controller?.initialize() ?? Promise.resolve()).catch((e: unknown) => {
     log.error(`Could not start review tracking: ${e instanceof Error ? e.message : String(e)}`);

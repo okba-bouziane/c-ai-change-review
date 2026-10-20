@@ -5,8 +5,9 @@ VS Code's native diff editor. Claude Review works alongside the official Claude 
 extension: it never calls an AI model, never launches an agent, and never changes how
 Claude Code works.
 
-> **Status:** early development (Phase 2). Changes are detected against a safe baseline and
-> listed in the panel; diffs and accept/reject come in the next phases.
+> **Status:** early development (Phase 3). Changes are detected against a safe baseline,
+> reviewed in native diffs, and accepted or rejected per file. Batch actions, undo, and
+> Claude Code hook integration come in the next phases.
 
 ## Development
 
