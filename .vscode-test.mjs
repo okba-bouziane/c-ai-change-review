@@ -18,5 +18,5 @@ export default defineConfig({
   workspaceFolder: workspace,
   ...(existsSync(localVSCode) ? { useInstallation: { fromPath: localVSCode } } : {}),
   launchArgs: ['--disable-extensions', '--disable-workspace-trust'],
-  mocha: { ui: 'tdd', timeout: 20000 },
+  mocha: { ui: 'tdd', timeout: 60000 },
 });

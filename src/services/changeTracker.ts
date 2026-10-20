@@ -1,3 +1,4 @@
+import * as fs from 'node:fs/promises';
 import type { GlobSet } from '../core/glob';
 import { inScope, normalizeRelPath, resolveInside, UnsafePathError } from '../core/paths';
 import { mapLimit } from '../core/pool';
@@ -81,12 +82,30 @@ export class ChangeTracker {
       all.forEach((p) => candidates.add(p));
     } else {
       for (const hint of options.hints ?? []) {
+        let rel: string;
         try {
-          candidates.add(normalizeRelPath(hint));
+          rel = normalizeRelPath(hint);
         } catch (e) {
-          if (!(e instanceof UnsafePathError)) {
-            throw e;
+          if (e instanceof UnsafePathError) {
+            continue;
           }
+          throw e;
+        }
+        // File watchers may report only a new folder, not each file created inside it.
+        const stat = await fs.lstat(resolveInside(session.root, rel)).catch(() => undefined);
+        if (stat?.isDirectory()) {
+          if (!this.exclude.matches(rel)) {
+            const inside = await walkFiles(
+              session.root,
+              this.exclude,
+              this.limits.maxFiles,
+              signal,
+              rel,
+            );
+            inside.forEach((p) => candidates.add(p));
+          }
+        } else {
+          candidates.add(rel);
         }
       }
     }
@@ -107,6 +126,13 @@ export class ChangeTracker {
         }
         const abs = resolveInside(session.root, p);
         const current = await this.cache.read(abs, signal);
+        if (
+          current.type === 'other' &&
+          current.reason === 'directory' &&
+          baseline.type === 'absent'
+        ) {
+          return; // Folders are not reviewed; the files inside them are.
+        }
         const kind = classify(baseline, current);
         if (kind) {
           changes.push(
@@ -173,7 +199,7 @@ export class ChangeTracker {
         const entry = inHead.get(p);
         let baseline: Baseline | undefined;
         if (entry) {
-          baseline = await gitBaseline(git, p, entry.blob, entry.mode, entry.type, signal);
+          baseline = await gitBaseline(git, p, entry, signal);
         } else if (!ignored.has(p)) {
           // Not in the baseline commit and not untracked at the baseline: it did not exist.
           baseline = { type: 'absent' };
@@ -193,18 +219,17 @@ export class ChangeTracker {
 async function gitBaseline(
   git: Git,
   relPath: string,
-  blob: string,
-  mode: number,
-  type: string,
+  entry: TreeEntry,
   signal?: AbortSignal,
 ): Promise<Baseline> {
+  const { blob, mode, type } = entry;
   if (type !== 'blob') {
     return { type: 'unavailable', reason: `a Git ${type} (submodule), not a file` };
   }
   if (mode === 0o120000) {
     return { type: 'unavailable', reason: 'symbolic links are not restored' };
   }
-  const size = await git.blobSize(blob, signal);
+  const size = entry.size ?? (await git.blobSize(blob, signal));
   if (size > MAX_GIT_BLOB_HASH_SIZE) {
     return { type: 'unavailable', reason: 'file is too large to compare' };
   }

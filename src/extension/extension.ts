@@ -141,6 +141,14 @@ export function activate(context: vscode.ExtensionContext): ClaudeReviewInternal
       }
       await controller.startSession();
     }),
+    vscode.commands.registerCommand('claudeReview.openStorage', async () => {
+      if (!context.storageUri) {
+        void vscode.window.showInformationMessage('Open a folder first.');
+        return;
+      }
+      await vscode.workspace.fs.createDirectory(context.storageUri);
+      await vscode.commands.executeCommand('revealFileInOS', context.storageUri);
+    }),
     vscode.commands.registerCommand('claudeReview.showLog', () => {
       log.show(true);
     }),

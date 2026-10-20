@@ -1,7 +1,7 @@
 {
   "name": "claude-review",
   "displayName": "Claude Review",
-  "description": "Review, accept, and reject file changes made by Claude Code using native VS Code diffs.",
+  "description": "Review, accept, and reject file changes made by Claude Code (or anything else) with native VS Code diffs, safe restores, and undo.",
   "version": "0.1.0",
   "publisher": "local",
   "license": "MIT",
@@ -166,6 +166,11 @@
       {
         "command": "claudeReview.hookStatus",
         "title": "Show Claude Code Hook Status",
+        "category": "Claude Review"
+      },
+      {
+        "command": "claudeReview.openStorage",
+        "title": "Open Snapshot Storage Folder",
         "category": "Claude Review"
       }
     ],

@@ -222,6 +222,52 @@ suite('Claude Review extension', () => {
     });
   });
 
+  suite('scale and independence', () => {
+    test('15. works without the Claude Code extension', () => {
+      const claude = vscode.extensions.getExtension('anthropic.claude-code');
+      assert.ok(!claude?.isActive, 'Claude Code is not active in this test host');
+      assert.ok(internals.controller?.activeSession, 'review tracking runs anyway');
+    });
+
+    test('13. 250 files appear in the panel and can be rejected and restored in bulk', async () => {
+      const controller = internals.controller;
+      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      assert.ok(controller && root);
+      const names = Array.from({ length: 250 }, (_, i) => `bulk/dir${i % 10}/file${i}.ts`);
+      const started = Date.now();
+      for (const name of names) {
+        await fs.mkdir(path.dirname(path.join(root, name)), { recursive: true });
+        await fs.writeFile(path.join(root, name), `export const n = ${names.indexOf(name)};\n`);
+      }
+      const pendingBulk = (): number =>
+        internals.changes
+          .getChanges()
+          .filter((f) => f.path.startsWith('bulk/') && f.status === 'pending').length;
+      assert.ok(await waitFor(() => pendingBulk() === 250, 20000), `saw ${pendingBulk()} of 250`);
+      const detectedMs = Date.now() - started;
+
+      const accept = await controller.accept(names);
+      assert.equal(accept.succeeded.length, 250);
+      for (const name of names) {
+        await fs.writeFile(path.join(root, name), 'changed by a tool\n');
+      }
+      assert.ok(await waitFor(() => pendingBulk() === 250, 20000));
+
+      const rejectStarted = Date.now();
+      const report = await controller.reject(names);
+      const rejectMs = Date.now() - rejectStarted;
+      assert.equal(report.succeeded.length, 250);
+      assert.equal(pendingBulk(), 0);
+      assert.equal(
+        await fs.readFile(path.join(root, names[7] ?? ''), 'utf8'),
+        'export const n = 7;\n',
+      );
+      console.info(
+        `scale (VS Code): 250 files listed after ${detectedMs} ms, rejected in ${rejectMs} ms`,
+      );
+    });
+  });
+
   suite('batch actions, undo, and recovery', () => {
     let folder: string;
     const fileFor = (rel: string): ChangedFile | undefined =>

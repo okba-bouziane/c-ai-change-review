@@ -175,15 +175,19 @@ export class WorktreeCapturer {
   }
 }
 
-/** Lists root-relative file paths, skipping excluded paths. Symlinks are listed, not followed. */
+/**
+ * Lists root-relative file paths under `start` ('' for everything), skipping excluded paths.
+ * Symlinks are listed, not followed.
+ */
 export async function walkFiles(
   root: string,
   exclude: GlobSet,
   maxFiles: number,
   signal?: AbortSignal,
+  start = '',
 ): Promise<string[]> {
   const result: string[] = [];
-  const queue: string[] = [''];
+  const queue: string[] = [start];
   for (let dir = queue.pop(); dir !== undefined; dir = queue.pop()) {
     signal?.throwIfAborted();
     let entries: Dirent[];

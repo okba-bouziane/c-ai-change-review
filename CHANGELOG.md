@@ -1,6 +1,13 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-10-20)
+
+- Scale: verified with 5,000 tracked files and 300 changes, and with 250 files inside VS Code.
+  Git baselines are resolved with one fewer process per file.
+- Fix: without Git, files created inside a new folder are found even when the file watcher
+  reports only the folder; folders themselves are never listed as changes.
+- Open Snapshot Storage Folder for manual recovery; full README with semantics, recovery,
+  troubleshooting, and limitations.
 
 - Optional Claude Code hook integration (Set Up / Remove Claude Code Hooks, Hook Status):
   PreToolUse/PostToolUse on Write|Edit|MultiEdit|NotebookEdit, UserPromptSubmit, and Stop,

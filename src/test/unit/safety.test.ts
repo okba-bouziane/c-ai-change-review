@@ -326,6 +326,19 @@ describe('16. without a Git repository', () => {
     expect(await h.detect()).toEqual([]);
   });
 
+  it('finds files inside a new folder when the watcher reports only the folder', async () => {
+    const root = await tempDir('claude-review-plain-');
+    await write(root, 'a.txt', 'alpha\n');
+    const h = await Harness.start(root);
+    await write(root, 'gen/deep/one.txt', '1\n');
+    await write(root, 'gen/two.txt', '2\n');
+    await write(root, 'gen/node_modules/x.js', 'excluded\n');
+    expect((await h.detect(['gen'], false)).map((c) => c.path)).toEqual([
+      'gen/deep/one.txt',
+      'gen/two.txt',
+    ]);
+  });
+
   it('finds new files from watcher hints without a full scan', async () => {
     const root = await tempDir('claude-review-plain-');
     await write(root, 'a.txt', 'alpha\n');

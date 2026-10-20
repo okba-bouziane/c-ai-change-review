@@ -40,6 +40,8 @@ export interface TreeEntry {
   readonly mode: number;
   readonly type: string;
   readonly blob: string;
+  /** Object size in bytes (before filters); undefined for trees and submodules. */
+  readonly size?: number;
 }
 
 export interface GitOptions {
@@ -142,13 +144,22 @@ export class Git {
   ): Promise<Map<string, TreeEntry>> {
     const result = new Map<string, TreeEntry>();
     for (const chunk of chunks(paths, 500)) {
-      const out = await this.run(['ls-tree', '-z', '--full-tree', commit, '--', ...chunk], signal);
+      const out = await this.run(
+        ['ls-tree', '-z', '--long', '--full-tree', commit, '--', ...chunk],
+        signal,
+      );
       for (const record of splitZ(out.toString('utf8'))) {
-        // "<mode> SP <type> SP <object> TAB <path>"
+        // "<mode> SP <type> SP <object> SP+ <size> TAB <path>" (size is "-" for non-blobs)
         const tab = record.indexOf('\t');
-        const [mode, type, blob] = record.slice(0, tab).split(' ');
+        const [mode, type, blob, size] = record.slice(0, tab).split(/ +/);
         if (mode && type && blob) {
-          result.set(record.slice(tab + 1), { mode: parseInt(mode, 8), type, blob });
+          const bytes = Number(size);
+          result.set(record.slice(tab + 1), {
+            mode: parseInt(mode, 8),
+            type,
+            blob,
+            ...(Number.isFinite(bytes) ? { size: bytes } : {}),
+          });
         }
       }
     }
