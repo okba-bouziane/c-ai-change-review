@@ -115,6 +115,10 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeNode>,
     if (file.oldPath) {
       tooltip.appendText(`\nRenamed from ${file.oldPath}`);
     }
+    if (file.restoreBlocker) {
+      tooltip.appendMarkdown('\n\n$(warning) ');
+      tooltip.appendText(`Cannot be rejected automatically. ${file.restoreBlocker}`);
+    }
     item.tooltip = tooltip;
     return item;
   }

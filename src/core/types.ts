@@ -12,6 +12,8 @@ export interface ChangedFile {
   readonly oldPath?: string;
   readonly kind: ChangeKind;
   readonly status: ReviewStatus;
+  /** Set when the change cannot be rejected automatically, explaining why. */
+  readonly restoreBlocker?: string;
 }
 
 export const CHANGE_KIND_ORDER: readonly ChangeKind[] = ['added', 'modified', 'deleted', 'renamed'];

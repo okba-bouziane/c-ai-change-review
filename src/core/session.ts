@@ -1,0 +1,193 @@
+import type { ChangeKind } from './types';
+
+/** Lowercase hex SHA-256 of a file's exact bytes. */
+export type Sha256 = string;
+
+/**
+ * What a path looked like at the review baseline.
+ *
+ * - absent: the path did not exist.
+ * - stored: exact bytes are in the snapshot store under `hash`.
+ * - git: bytes equal the Git blob checked out through the repository's filters
+ *   (used for files that were clean at the baseline, so nothing is copied).
+ * - unavailable: the path existed but its bytes were deliberately not kept (too large,
+ *   sensitive, symlink, unreadable). `hash` is present when it could still be measured,
+ *   which lets change detection work even though restore cannot.
+ */
+export type Baseline =
+  | { readonly type: 'absent' }
+  | { readonly type: 'stored'; readonly hash: Sha256; readonly size: number; readonly mode: number }
+  | {
+      readonly type: 'git';
+      readonly blob: string;
+      readonly mode: number;
+      /** Filled in once the filtered blob has been hashed. */
+      readonly hash?: Sha256;
+      readonly size?: number;
+    }
+  | {
+      readonly type: 'unavailable';
+      readonly reason: string;
+      readonly hash?: Sha256;
+      readonly size?: number;
+    };
+
+/** What a path looks like on disk right now. */
+export type CurrentState =
+  | { readonly type: 'absent' }
+  | { readonly type: 'file'; readonly hash: Sha256; readonly size: number; readonly mode: number }
+  /** Exists but is not a regular file we can read and hash (directory, symlink, EACCES...). */
+  | { readonly type: 'other'; readonly reason: string };
+
+export type SessionMode = 'git' | 'filesystem';
+
+export interface SessionData {
+  readonly version: 1;
+  readonly id: string;
+  readonly createdAt: string;
+  /** Absolute path of the VS Code workspace folder this session belongs to. */
+  readonly workspaceFolder: string;
+  /** Absolute session root: the Git top-level, or the workspace folder in filesystem mode. */
+  readonly root: string;
+  /** Root-relative path of the workspace folder inside root ('' when they are the same). */
+  readonly scope: string;
+  readonly mode: SessionMode;
+  /** HEAD commit at the baseline, or null for an unborn branch / filesystem mode. */
+  readonly head: string | null;
+  /**
+   * Explicit baselines keyed by root-relative path. In Git mode this holds every path that
+   * was dirty, staged, or untracked at the baseline, plus clean files resolved lazily from
+   * HEAD. In filesystem mode it holds every file that existed at the baseline.
+   */
+  readonly baselines: Record<string, Baseline>;
+  /** Problems worth surfacing later (capture skipped files, restore conflicts, ...). */
+  readonly log: SessionLogEntry[];
+}
+
+export interface SessionLogEntry {
+  readonly at: string;
+  readonly level: 'info' | 'warning' | 'error';
+  readonly path?: string;
+  readonly message: string;
+}
+
+/** A detected difference between a path's baseline and its current state. */
+export interface DetectedChange {
+  readonly path: string;
+  readonly kind: ChangeKind;
+  /** Rename source, when kind === 'renamed'. */
+  readonly oldPath?: string;
+  readonly baseline: Baseline;
+  /** Baseline of oldPath for renames. */
+  readonly oldBaseline?: Baseline;
+  readonly current: CurrentState;
+  /** Why this change cannot be rejected automatically, if it cannot. */
+  readonly restoreBlocker?: string;
+}
+
+export function baselineHash(b: Baseline): Sha256 | undefined {
+  return b.type === 'absent' ? undefined : b.hash;
+}
+
+export function baselineExists(b: Baseline): boolean {
+  return b.type !== 'absent';
+}
+
+/** Hash of the current state used for optimistic concurrency checks ('absent' when missing). */
+export function stateToken(s: CurrentState): string {
+  switch (s.type) {
+    case 'absent':
+      return 'absent';
+    case 'file':
+      return `file:${s.hash}:${s.mode.toString(8)}`;
+    case 'other':
+      return `other:${s.reason}`;
+  }
+}
+
+/**
+ * Compares a baseline with the current state.
+ * Returns the change kind, or undefined when the path is unchanged.
+ */
+export function classify(baseline: Baseline, current: CurrentState): ChangeKind | undefined {
+  const existedBefore = baselineExists(baseline);
+  if (current.type === 'absent') {
+    return existedBefore ? 'deleted' : undefined;
+  }
+  if (!existedBefore) {
+    return 'added';
+  }
+  if (current.type === 'other') {
+    return 'modified';
+  }
+  const before = baselineHash(baseline);
+  if (before === undefined || before !== current.hash) {
+    return 'modified';
+  }
+  // Same bytes; an executable-bit flip still counts as a change worth reviewing.
+  const beforeMode =
+    baseline.type === 'stored' || baseline.type === 'git' ? baseline.mode : undefined;
+  if (beforeMode !== undefined && (beforeMode & 0o111) !== (current.mode & 0o111)) {
+    return 'modified';
+  }
+  return undefined;
+}
+
+/** Why a baseline cannot be written back, or undefined when it can. */
+export function restoreBlocker(b: Baseline): string | undefined {
+  return b.type === 'unavailable' ? `Original content was not captured: ${b.reason}` : undefined;
+}
+
+/**
+ * Pairs deletions with additions of identical content into renames. A pair is only formed
+ * when the content hash identifies exactly one deleted and one added file, so ambiguous
+ * cases (several copies of the same file) stay as separate add/delete entries.
+ */
+export function pairRenames(changes: readonly DetectedChange[]): DetectedChange[] {
+  const deletedByHash = new Map<Sha256, DetectedChange[]>();
+  const addedByHash = new Map<Sha256, DetectedChange[]>();
+  for (const c of changes) {
+    if (c.kind === 'deleted') {
+      const h = baselineHash(c.baseline);
+      if (h !== undefined && c.baseline.type !== 'unavailable') {
+        push(deletedByHash, h, c);
+      }
+    } else if (c.kind === 'added' && c.current.type === 'file') {
+      push(addedByHash, c.current.hash, c);
+    }
+  }
+
+  const consumed = new Set<DetectedChange>();
+  const renames: DetectedChange[] = [];
+  for (const [hash, deleted] of deletedByHash) {
+    const added = addedByHash.get(hash);
+    const [del] = deleted;
+    const [add] = added ?? [];
+    if (deleted.length === 1 && added?.length === 1 && del && add) {
+      consumed.add(del).add(add);
+      renames.push({
+        path: add.path,
+        kind: 'renamed',
+        oldPath: del.path,
+        baseline: add.baseline,
+        oldBaseline: del.baseline,
+        current: add.current,
+        ...withBlocker(del.restoreBlocker ?? add.restoreBlocker),
+      });
+    }
+  }
+  return [...changes.filter((c) => !consumed.has(c)), ...renames];
+}
+
+export function withBlocker(blocker: string | undefined): { restoreBlocker?: string } {
+  return blocker === undefined ? {} : { restoreBlocker: blocker };
+}
+
+function push<K, V>(map: Map<K, V[]>, key: K, value: V): void {
+  const list = map.get(key);
+  if (list) {
+    list.push(value);
+  } else {
+    map.set(key, [value]);
+  }
+}

@@ -70,6 +70,12 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "claudeReview.startSession",
+        "title": "Start New Review Session",
+        "category": "Claude Review",
+        "icon": "$(debug-restart)"
+      },
+      {
         "command": "claudeReview.showLog",
         "title": "Show Log",
         "category": "Claude Review",
@@ -84,11 +90,76 @@
           "group": "navigation@9"
         },
         {
+          "command": "claudeReview.startSession",
+          "when": "view == claudeReview.changes",
+          "group": "z_more@0"
+        },
+        {
           "command": "claudeReview.showLog",
           "when": "view == claudeReview.changes",
           "group": "z_more@1"
         }
       ]
+    },
+    "configuration": {
+      "title": "Claude Review",
+      "properties": {
+        "claudeReview.autoTrack": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Automatically start a review session when a workspace opens, so changes made afterwards (by Claude Code or anything else) are listed for review."
+        },
+        "claudeReview.exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "**/node_modules/**",
+            "**/.DS_Store"
+          ],
+          "markdownDescription": "Glob patterns for paths that are never tracked. Patterns without `/` match a name at any depth."
+        },
+        "claudeReview.snapshot.sensitivePatterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            ".env",
+            ".env.*",
+            "*.pem",
+            "*.key",
+            "*.p12",
+            "*.pfx",
+            "id_rsa*",
+            "id_ecdsa*",
+            "id_ed25519*",
+            ".npmrc",
+            ".netrc",
+            ".pypirc"
+          ],
+          "markdownDescription": "Files matching these patterns are never copied into extension storage. Changes to them are still detected, but they cannot be rejected automatically unless they are tracked in Git."
+        },
+        "claudeReview.snapshot.maxFileSizeMB": {
+          "type": "number",
+          "default": 5,
+          "minimum": 0,
+          "markdownDescription": "Uncommitted or untracked files larger than this are not copied when a session starts. Changes are still detected, but those files cannot be rejected automatically."
+        },
+        "claudeReview.snapshot.maxTotalSizeMB": {
+          "type": "number",
+          "default": 200,
+          "minimum": 0,
+          "markdownDescription": "Maximum total size copied when a session starts."
+        },
+        "claudeReview.filesystemMode.maxFiles": {
+          "type": "number",
+          "default": 20000,
+          "minimum": 1,
+          "markdownDescription": "Outside Git repositories every file must be copied at session start. Workspaces with more files than this are not tracked."
+        }
+      }
     }
   },
   "scripts": {
