@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "mocha"],
+    "noEmit": false
+  },
+  "include": ["src/test/integration/**/*.ts"],
+  "exclude": []
+}

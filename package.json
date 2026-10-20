@@ -1,0 +1,125 @@
+{
+  "name": "claude-review",
+  "displayName": "Claude Review",
+  "description": "Review, accept, and reject file changes made by Claude Code using native VS Code diffs.",
+  "version": "0.1.0",
+  "publisher": "local",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "vscode": "^1.94.0"
+  },
+  "categories": [
+    "SCM Providers",
+    "Other"
+  ],
+  "keywords": [
+    "review",
+    "diff",
+    "claude code",
+    "ai"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Claude Review restores and deletes workspace files, so it only runs in trusted workspaces."
+    },
+    "virtualWorkspaces": false
+  },
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "claudeReview",
+          "title": "Claude Review",
+          "icon": "media/claude-review.svg"
+        }
+      ]
+    },
+    "views": {
+      "claudeReview": [
+        {
+          "id": "claudeReview.changes",
+          "name": "Changes",
+          "icon": "media/claude-review.svg",
+          "contextualTitle": "Claude Review"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "claudeReview.changes",
+        "contents": "No changes to review.\nFiles changed by Claude Code in this workspace will appear here, grouped by Added, Modified, Deleted, and Renamed.\n[Refresh](command:claudeReview.refresh)",
+        "when": "workspaceFolderCount > 0"
+      },
+      {
+        "view": "claudeReview.changes",
+        "contents": "Open a folder to start reviewing changes.\n[Open Folder](command:vscode.openFolder)",
+        "when": "workspaceFolderCount == 0"
+      }
+    ],
+    "commands": [
+      {
+        "command": "claudeReview.refresh",
+        "title": "Refresh",
+        "category": "Claude Review",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "claudeReview.showLog",
+        "title": "Show Log",
+        "category": "Claude Review",
+        "icon": "$(output)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "claudeReview.refresh",
+          "when": "view == claudeReview.changes",
+          "group": "navigation@9"
+        },
+        {
+          "command": "claudeReview.showLog",
+          "when": "view == claudeReview.changes",
+          "group": "z_more@1"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc -p . --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test:unit": "vitest run",
+    "compile-tests": "tsc -p tsconfig.test.json",
+    "test:integration": "npm run build && npm run compile-tests && vscode-test",
+    "test": "npm run test:unit && npm run test:integration",
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm run test:unit",
+    "vscode:prepublish": "node esbuild.mjs --production",
+    "package": "vsce package --no-dependencies --allow-missing-repository"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^22.0.0",
+    "@types/vscode": "1.94.0",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.13.0",
+    "mocha": "^12.0.3",
+    "prettier": "^3.9.10",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.72.0",
+    "vitest": "^5.0.5"
+  }
+}
