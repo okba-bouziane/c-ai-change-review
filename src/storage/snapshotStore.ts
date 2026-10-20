@@ -57,8 +57,12 @@ export class SnapshotStore {
     return exists(this.pathFor(hash));
   }
 
-  /** Deletes every blob not in keep. Returns the number of blobs removed. */
-  async collectGarbage(keep: ReadonlySet<Sha256>): Promise<number> {
+  /**
+   * Deletes every blob not in keep. Returns the number of blobs removed. Blobs modified
+   * within `graceMs` are kept: the Claude Code hook writes blobs here before the extension
+   * has recorded them in a session.
+   */
+  async collectGarbage(keep: ReadonlySet<Sha256>, graceMs = 0, now = Date.now()): Promise<number> {
     let removed = 0;
     let shards: string[];
     try {
@@ -74,10 +78,18 @@ export class SnapshotStore {
         continue;
       }
       for (const name of await fs.readdir(path.join(this.dir, shard))) {
-        if (!keep.has(shard + name)) {
-          await fs.rm(path.join(this.dir, shard, name), { force: true });
-          removed++;
+        const file = path.join(this.dir, shard, name);
+        if (keep.has(shard + name)) {
+          continue;
         }
+        if (graceMs > 0) {
+          const stat = await fs.stat(file).catch(() => undefined);
+          if (stat && now - stat.mtimeMs < graceMs) {
+            continue;
+          }
+        }
+        await fs.rm(file, { force: true });
+        removed++;
       }
     }
     return removed;

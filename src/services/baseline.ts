@@ -56,6 +56,9 @@ export async function captureBaseline(
   options: CaptureOptions,
   gitPath?: string,
 ): Promise<{ session: SessionData; git: Git | undefined }> {
+  // Recorded before anything is read: edits reported by hooks with an earlier timestamp may
+  // already be inside this baseline.
+  const startedAt = new Date().toISOString();
   const folder = path.resolve(workspaceFolder);
   const gitRoot = await Git.findRoot(folder, gitPath);
   const root = gitRoot ?? folder;
@@ -99,7 +102,7 @@ export async function captureBaseline(
   const session: SessionData = {
     version: 1,
     id: randomUUID(),
-    createdAt: new Date().toISOString(),
+    createdAt: startedAt,
     workspaceFolder: folder,
     root,
     scope,
@@ -109,6 +112,7 @@ export async function captureBaseline(
     log,
     reviews: {},
     history: [],
+    attribution: {},
   };
   return { session, git };
 }

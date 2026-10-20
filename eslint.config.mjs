@@ -15,6 +15,10 @@ export default tseslint.config(
     },
     rules: {
       '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { ignoreRestSiblings: true, argsIgnorePattern: '^_' },
+      ],
       '@typescript-eslint/explicit-function-return-type': ['error', { allowExpressions: true }],
       '@typescript-eslint/restrict-template-expressions': ['error', { allowNumber: true }],
       'no-restricted-syntax': [

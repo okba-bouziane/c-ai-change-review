@@ -17,6 +17,8 @@ import {
 } from '../services/actions';
 import { readBaselineBytes } from '../services/restore';
 import { applyRetention } from '../storage/retention';
+import { applyEditEvent, deleteEvent, readPendingEvents } from '../hooks/hookEvents';
+import { isEditEvent } from '../hooks/protocol';
 import type { SessionStore } from '../storage/sessionStore';
 import type { SnapshotStore } from '../storage/snapshotStore';
 import { readConfig, SECTION } from './config';
@@ -49,10 +51,15 @@ export interface ControllerDeps {
  */
 export class ReviewController implements vscode.Disposable {
   private readonly changeEmitter = new vscode.EventEmitter<readonly ChangedFile[]>();
+  private readonly stopEmitter = new vscode.EventEmitter<number>();
+  /** Fires with the number of pending changes when Claude Code reports that it stopped. */
+  readonly onClaudeStopped = this.stopEmitter.event;
+  /** True once any hook event arrived, so "unattributed" is meaningful to show. */
+  private hooksSeen = false;
   /** Fires with the latest change list after every successful refresh. */
   readonly onDidChange = this.changeEmitter.event;
 
-  private readonly disposables: vscode.Disposable[] = [this.changeEmitter];
+  private readonly disposables: vscode.Disposable[] = [this.changeEmitter, this.stopEmitter];
   private session: SessionData | undefined;
   private tracker: ChangeTracker | undefined;
   private git: Git | undefined;
@@ -186,6 +193,80 @@ export class ReviewController implements vscode.Disposable {
       this.deps.log.info(`Ended review session ${ended?.id ?? ''}`);
       this.changeEmitter.fire([]);
     });
+  }
+
+  /**
+   * Applies queued Claude Code hook events: task boundaries, pre/post edit attribution, and
+   * stop notifications. Events are deleted once applied.
+   */
+  async ingestHookEvents(
+    storageDir: string,
+    isIgnored: (key: string) => Promise<boolean>,
+  ): Promise<void> {
+    await this.enqueue(async () => {
+      const pending = await readPendingEvents(storageDir);
+      if (pending.length === 0) {
+        return;
+      }
+      this.hooksSeen = true;
+      let changed = false;
+      let stopped = false;
+      for (const item of pending) {
+        const { event } = item;
+        if (isEditEvent(event)) {
+          const applied = this.session
+            ? await applyEditEvent(this.session, event, { isIgnored })
+            : undefined;
+          if (applied) {
+            changed = true;
+            this.pendingHints.add(applied.key);
+            const abs = this.absolutePath(applied.key);
+            if (abs) {
+              this.tracker?.invalidate(abs);
+            }
+          }
+        } else if (event.type === 'prompt') {
+          await this.onPrompt();
+        } else {
+          stopped = true;
+        }
+        await deleteEvent(item);
+      }
+      if (changed && this.session) {
+        await this.deps.sessions.save(this.session);
+      }
+      await this.refresh();
+      if (stopped) {
+        this.stopEmitter.fire(this.changes.length);
+      }
+    });
+  }
+
+  /** A new Claude Code prompt: start a fresh session when nothing is waiting for review. */
+  private async onPrompt(): Promise<void> {
+    const config = readConfig(this.deps.folder);
+    if (!this.session) {
+      if (config.autoTrack) {
+        this.deps.log.info('Claude Code prompt received: starting a review session');
+        await this.startSession();
+      }
+      return;
+    }
+    if (!config.newSessionPerPrompt) {
+      return;
+    }
+    await this.refresh();
+    if (this.changes.length === 0) {
+      this.deps.log.info(
+        'Claude Code prompt received: starting a new review session for this task',
+      );
+      await this.startSession();
+    } else {
+      this.deps.log.info(
+        `Claude Code prompt received, but ${this.changes.length} changes are still pending; ` +
+          'continuing the current review session so they are not hidden.',
+      );
+    }
   }
 
   private async runAction(
@@ -462,6 +543,8 @@ export class ReviewController implements vscode.Disposable {
         status: 'pending',
         ...(c.oldPath !== undefined ? { oldPath: toWorkspace(c.oldPath) } : {}),
         ...(c.restoreBlocker !== undefined ? { restoreBlocker: c.restoreBlocker } : {}),
+        ...(c.origin !== undefined && this.hooksSeen ? { origin: c.origin } : {}),
+        ...(c.restoreTarget ? { restoresPreClaudeState: true } : {}),
       });
     }
     for (const [key, record] of Object.entries(session.reviews)) {

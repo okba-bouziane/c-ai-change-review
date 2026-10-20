@@ -75,6 +75,7 @@ export async function acceptChange(
       Reflect.deleteProperty(session.reviews, change.oldPath);
     }
     session.reviews[change.path] = record;
+    Reflect.deleteProperty(session.attribution, change.path);
     return { ok: true, record };
   } catch (e) {
     return { ok: false, reason: 'failed', message: describeError(e) };
@@ -106,13 +107,14 @@ export async function rejectChange(
     status: 'rejected',
     kind: change.kind,
     at: new Date().toISOString(),
-    before: change.baseline,
+    before: change.restoreTarget ?? change.baseline,
     after: main?.replaced ?? { type: 'absent' },
     ...(change.oldPath !== undefined ? { oldPath: change.oldPath } : {}),
     ...(change.oldBaseline ? { oldBefore: change.oldBaseline } : {}),
     ...(old?.replaced ? { oldAfter: old.replaced } : {}),
   };
   deps.session.reviews[change.path] = record;
+  Reflect.deleteProperty(deps.session.attribution, change.path);
   if (change.oldPath !== undefined) {
     Reflect.deleteProperty(deps.session.reviews, change.oldPath);
   }

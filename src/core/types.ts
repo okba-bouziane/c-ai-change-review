@@ -16,6 +16,10 @@ export interface ChangedFile {
   readonly status: ReviewStatus;
   /** Set when the change cannot be rejected automatically, explaining why. */
   readonly restoreBlocker?: string;
+  /** Whether Claude Code's file tools made this change (known only with hooks). */
+  readonly origin?: 'claude' | 'claude-then-other' | 'unattributed';
+  /** True when Reject restores the file as it was right before Claude's first edit. */
+  readonly restoresPreClaudeState?: boolean;
 }
 
 export const CHANGE_KIND_ORDER: readonly ChangeKind[] = ['added', 'modified', 'deleted', 'renamed'];

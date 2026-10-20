@@ -9,6 +9,8 @@ export interface ReviewConfig {
   readonly autoTrack: boolean;
   readonly confirmReject: boolean;
   readonly openNextAfterDecision: boolean;
+  readonly newSessionPerPrompt: boolean;
+  readonly notifyOnStop: boolean;
   readonly exclude: GlobSet;
   readonly sensitive: GlobSet;
   readonly limits: CaptureLimits;
@@ -23,6 +25,8 @@ export function readConfig(scope?: vscode.ConfigurationScope): ReviewConfig {
     autoTrack: c.get<boolean>('autoTrack', true),
     confirmReject: c.get<boolean>('confirmReject', true),
     openNextAfterDecision: c.get<boolean>('openNextAfterDecision', true),
+    newSessionPerPrompt: c.get<boolean>('hooks.newSessionPerPrompt', true),
+    notifyOnStop: c.get<boolean>('hooks.notifyOnStop', true),
     exclude: new GlobSet(c.get<string[]>('exclude', [])),
     sensitive: new GlobSet(c.get<string[]>('snapshot.sensitivePatterns', [])),
     limits: {

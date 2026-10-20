@@ -279,6 +279,7 @@ describe('retention', () => {
       log: [],
       reviews: {},
       history: [],
+      attribution: {},
     };
   }
 
@@ -295,6 +296,13 @@ describe('retention', () => {
       const day = String(10 + i).padStart(2, '0');
       await sessions.save(fakeSession(id, `2026-10-${day}T00:00:00Z`, hash));
     }
+    // Age every blob past the grace period that protects freshly written hook snapshots.
+    const old = new Date('2026-10-01T00:00:00Z');
+    for (const shard of await fs.readdir(snapshots.dir)) {
+      for (const name of await fs.readdir(path.join(snapshots.dir, shard))) {
+        await fs.utimes(path.join(snapshots.dir, shard, name), old, old);
+      }
+    }
     // The oldest session is active and must survive regardless of age or count.
     const result = await applyRetention(
       sessions,
@@ -306,6 +314,19 @@ describe('retention', () => {
     expect(result.sessionsDeleted).toBe(4);
     expect((await sessions.list()).map((s) => s.id).sort()).toEqual(['s0', 's5', 's6', 's7']);
     expect(result.snapshotsDeleted).toBe(4);
+  });
+
+  it('never collects unreferenced blobs written within the last hour', async () => {
+    const storage = await tempDir();
+    const snapshots = new SnapshotStore(path.join(storage, 'snapshots'));
+    await snapshots.put(Buffer.from('written by the hook a moment ago'));
+    const result = await applyRetention(
+      new SessionStore(storage),
+      snapshots,
+      { maxSessions: 0, maxAgeDays: 0 },
+      undefined,
+    );
+    expect(result.snapshotsDeleted).toBe(0);
   });
 
   it('deletes ended sessions older than the age limit', async () => {

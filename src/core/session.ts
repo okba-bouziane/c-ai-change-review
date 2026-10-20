@@ -66,7 +66,37 @@ export interface SessionData {
   readonly reviews: Record<string, ReviewRecord>;
   /** Review actions that can be undone, oldest first. */
   readonly history: HistoryEntry[];
+  /**
+   * Edits made through Claude Code's file tools, reported by the optional hooks and keyed by
+   * root-relative path. Absent for paths Claude has not edited (or when hooks are off).
+   */
+  readonly attribution: Record<string, Attribution>;
 }
+
+/**
+ * What the hooks observed about Claude Code editing one path during this session.
+ *
+ * `before` is the file as it was immediately before Claude's first edit, captured by the
+ * PreToolUse hook. When it differs from the session baseline, the difference was made by
+ * someone else (the user, a formatter, a Bash command) before Claude touched the file, and
+ * rejecting restores `before` so that work survives.
+ */
+export interface Attribution {
+  readonly before: Baseline;
+  /** stateToken()-style token of the file right after Claude's most recent edit. */
+  readonly afterToken?: string;
+  readonly claudeSessionId?: string;
+  readonly at: string;
+}
+
+/** How a detected change relates to Claude Code's own edits. */
+export type ChangeOrigin =
+  /** The file is exactly as Claude's last edit left it. */
+  | 'claude'
+  /** Claude edited the file, and it changed again afterwards. */
+  | 'claude-then-other'
+  /** No Claude edit was reported for this file (Bash, formatters, user, or hooks off). */
+  | 'unattributed';
 
 /** One undoable user action: a single decision or a whole Accept All / Reject All. */
 export interface HistoryEntry {
@@ -83,6 +113,8 @@ export interface HistoryItem {
   readonly previous?: ReviewRecord;
   /** For renames: the decision recorded on the old path, if any. */
   readonly oldPrevious?: ReviewRecord;
+  /** Hook attribution the action cleared, restored on undo. */
+  readonly attribution?: Attribution;
 }
 
 /**
@@ -126,6 +158,12 @@ export interface DetectedChange {
   readonly current: CurrentState;
   /** Why this change cannot be rejected automatically, if it cannot. */
   readonly restoreBlocker?: string;
+  readonly origin?: ChangeOrigin;
+  /**
+   * What Reject writes back when it is not the baseline: the file as it was right before
+   * Claude first edited it, when that already contained other changes.
+   */
+  readonly restoreTarget?: Baseline;
 }
 
 export function baselineHash(b: Baseline): Sha256 | undefined {
@@ -269,6 +307,9 @@ export function referencedHashes(session: SessionData): Set<Sha256> {
     }
   };
   Object.values(session.baselines).forEach(add);
+  Object.values(session.attribution).forEach((a) => {
+    add(a.before);
+  });
   Object.values(session.reviews).forEach(addRecord);
   for (const entry of session.history) {
     for (const item of entry.items) {
@@ -278,4 +319,27 @@ export function referencedHashes(session: SessionData): Set<Sha256> {
     }
   }
   return hashes;
+}
+
+/**
+ * Applies hook attribution to a detected change: labels its origin and, when Claude's
+ * pre-edit snapshot differs from the baseline, makes Reject restore that snapshot instead.
+ */
+export function attribute(change: DetectedChange, a: Attribution | undefined): DetectedChange {
+  if (!a || change.kind === 'renamed') {
+    return { ...change, origin: 'unattributed' };
+  }
+  const origin: ChangeOrigin =
+    a.afterToken !== undefined && a.afterToken === stateToken(change.current)
+      ? 'claude'
+      : 'claude-then-other';
+  const beforeToken = baselineToken(a.before);
+  const differsFromBaseline =
+    beforeToken === undefined || beforeToken !== baselineToken(change.baseline);
+  if (!differsFromBaseline || a.before.type === 'unavailable') {
+    return { ...change, origin };
+  }
+  // Rejecting removes only what happened from Claude's first edit onwards.
+  const { restoreBlocker, ...rest } = change;
+  return { ...rest, origin, restoreTarget: a.before };
 }

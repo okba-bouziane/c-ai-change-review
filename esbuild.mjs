@@ -17,9 +17,20 @@ const options = {
   logLevel: 'info',
 };
 
+/** The Claude Code hook runs as its own short-lived Node process, outside VS Code. */
+const hookOptions = {
+  ...options,
+  entryPoints: ['src/hooks/hookScript.ts'],
+  outfile: 'dist/hook.js',
+  external: [],
+  target: 'node18',
+};
+
 if (watch) {
-  const ctx = await esbuild.context(options);
-  await ctx.watch();
+  for (const o of [options, hookOptions]) {
+    const ctx = await esbuild.context(o);
+    await ctx.watch();
+  }
 } else {
-  await esbuild.build(options);
+  await Promise.all([esbuild.build(options), esbuild.build(hookOptions)]);
 }

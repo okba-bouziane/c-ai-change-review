@@ -23,7 +23,12 @@ export class SessionStore {
     }
     // Sessions written by earlier versions may lack `reviews` and `history`.
     const partial = data as Partial<SessionData>;
-    return { ...data, reviews: partial.reviews ?? {}, history: partial.history ?? [] };
+    return {
+      ...data,
+      reviews: partial.reviews ?? {},
+      history: partial.history ?? [],
+      attribution: partial.attribution ?? {},
+    };
   }
 
   /** All readable saved sessions. Unreadable files are ignored. */

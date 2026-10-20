@@ -138,7 +138,13 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeNode>,
       file.restoreBlocker && file.status === 'pending'
         ? 'Pending ⚠'
         : REVIEW_STATUS_LABEL[file.status];
-    item.description = [location, status].filter(Boolean).join(' · ');
+    const origin =
+      file.origin === 'claude'
+        ? 'Claude'
+        : file.origin === 'claude-then-other'
+          ? 'Claude, then edited'
+          : '';
+    item.description = [location, origin, status].filter(Boolean).join(' · ');
     item.contextValue = `file.${file.kind}.${file.status}${file.restoreBlocker ? '.blocked' : ''}`;
     item.command = {
       command: 'claudeReview.openDiff',
@@ -154,6 +160,22 @@ export class ChangesTreeProvider implements vscode.TreeDataProvider<ChangeNode>,
     tooltip.appendText(file.path);
     if (file.oldPath) {
       tooltip.appendText(`\nRenamed from ${file.oldPath}`);
+    }
+    if (file.origin === 'claude') {
+      tooltip.appendMarkdown('\n\n$(sparkle) Written by Claude Code and unchanged since.');
+    } else if (file.origin === 'claude-then-other') {
+      tooltip.appendMarkdown(
+        '\n\n$(sparkle) Edited by Claude Code, then changed again by something else.',
+      );
+    } else if (file.origin === 'unattributed') {
+      tooltip.appendMarkdown(
+        "\n\nNot edited through Claude Code's file tools (for example a terminal command, a formatter, or you).",
+      );
+    }
+    if (file.restoresPreClaudeState) {
+      tooltip.appendMarkdown(
+        '\n\nReject restores this file as it was right before Claude first edited it, keeping earlier changes made by others.',
+      );
     }
     if (file.restoreBlocker) {
       tooltip.appendMarkdown('\n\n$(warning) ');

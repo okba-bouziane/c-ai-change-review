@@ -1,4 +1,5 @@
 import * as assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
@@ -168,6 +169,56 @@ suite('Claude Review extension', () => {
 
       await vscode.commands.executeCommand('claudeReview.rejectFile', fileFor('keep.txt'));
       assert.equal(await fs.readFile(path.join(folder, 'keep.txt'), 'utf8'), 'precious\n');
+    });
+  });
+
+  suite('Claude Code hook events', () => {
+    test('events from the real hook script attribute a change to Claude', async () => {
+      const storage = internals.storageDir;
+      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      assert.ok(storage && root);
+      const config = JSON.parse(
+        await fs.readFile(path.join(storage, 'hook-config.json'), 'utf8'),
+      ) as {
+        root: string;
+      };
+      assert.equal(config.root, root);
+
+      const ext = vscode.extensions.getExtension('local.claude-review');
+      assert.ok(ext);
+      const hookScript = path.join(ext.extensionPath, 'dist', 'hook.js');
+      const file = path.join(root, 'claude-edit.txt');
+      const runHook = (event: string): Promise<number | null> =>
+        new Promise((resolve, reject) => {
+          const child = spawn(process.env.npm_node_execpath ?? 'node', [
+            hookScript,
+            '--storage',
+            storage,
+          ]);
+          child.on('error', reject);
+          child.on('close', resolve);
+          child.stdin.end(
+            JSON.stringify({
+              session_id: 'it-session',
+              cwd: root,
+              hook_event_name: event,
+              tool_name: 'Write',
+              tool_input: { file_path: file, content: 'from claude\n' },
+            }),
+          );
+        });
+
+      assert.equal(await runHook('PreToolUse'), 0);
+      await fs.writeFile(file, 'from claude\n');
+      assert.equal(await runHook('PostToolUse'), 0);
+
+      const fileFor = (): ChangedFile | undefined =>
+        internals.changes.getChanges().find((f) => f.path === 'claude-edit.txt');
+      assert.ok(
+        await waitFor(() => fileFor()?.origin === 'claude'),
+        'change is attributed to Claude',
+      );
+      assert.equal(fileFor()?.kind, 'added');
     });
   });
 

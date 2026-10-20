@@ -2,6 +2,9 @@ import { referencedHashes } from '../core/session';
 import type { SessionStore } from './sessionStore';
 import type { SnapshotStore } from './snapshotStore';
 
+/** Recently written blobs may belong to hook events not yet ingested; never collect them. */
+const HOOK_BLOB_GRACE_MS = 60 * 60 * 1000;
+
 export interface RetentionPolicy {
   /** Ended sessions kept besides the active one. */
   readonly maxSessions: number;
@@ -46,6 +49,6 @@ export async function applyRetention(
   for (const session of kept) {
     referencedHashes(session).forEach((h) => keep.add(h));
   }
-  const snapshotsDeleted = await snapshots.collectGarbage(keep);
+  const snapshotsDeleted = await snapshots.collectGarbage(keep, HOOK_BLOB_GRACE_MS, now);
   return { sessionsDeleted, snapshotsDeleted };
 }

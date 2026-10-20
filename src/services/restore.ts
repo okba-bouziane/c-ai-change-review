@@ -63,7 +63,7 @@ export function plansForChange(change: DetectedChange): RestorePlan[] {
       { path: change.path, baseline: change.baseline, expected },
     ];
   }
-  return [{ path: change.path, baseline: change.baseline, expected }];
+  return [{ path: change.path, baseline: change.restoreTarget ?? change.baseline, expected }];
 }
 
 /**

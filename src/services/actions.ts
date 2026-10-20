@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   baselineToken,
+  type Attribution,
   type DetectedChange,
   type HistoryEntry,
   type HistoryItem,
@@ -28,6 +29,8 @@ export interface ActionDeps {
 
 export interface ActionOptions {
   readonly signal?: AbortSignal;
+  /** False for housekeeping actions that should not appear in the undo history. */
+  readonly recordHistory?: boolean;
   readonly onProgress?: (done: number, total: number, key: string) => void;
 }
 
@@ -95,7 +98,9 @@ export async function acceptMany(
       ).push(issue);
     }
   }
-  pushHistory(deps.session, 'accept', items);
+  if (options.recordHistory !== false) {
+    pushHistory(deps.session, 'accept', items);
+  }
   return report;
 }
 
@@ -126,7 +131,9 @@ export async function rejectMany(
       classifyFailure(report, change.path, outcome.results);
     }
   }
-  pushHistory(deps.session, 'reject', items);
+  if (options.recordHistory !== false) {
+    pushHistory(deps.session, 'reject', items);
+  }
   return report;
 }
 
@@ -206,15 +213,23 @@ function restorePrevious(session: SessionData, item: HistoryItem): void {
   if (oldPath !== undefined && item.oldPrevious) {
     session.reviews[oldPath] = item.oldPrevious;
   }
+  if (item.attribution) {
+    session.attribution[item.key] = item.attribution;
+  }
 }
 
 function snapshotPrevious(
   session: SessionData,
   change: DetectedChange,
-): { previous?: ReviewRecord; oldPrevious?: ReviewRecord } {
+): { previous?: ReviewRecord; oldPrevious?: ReviewRecord; attribution?: Attribution } {
   const previous = session.reviews[change.path];
   const oldPrevious = change.oldPath !== undefined ? session.reviews[change.oldPath] : undefined;
-  return { ...(previous ? { previous } : {}), ...(oldPrevious ? { oldPrevious } : {}) };
+  const attribution = session.attribution[change.path];
+  return {
+    ...(previous ? { previous } : {}),
+    ...(oldPrevious ? { oldPrevious } : {}),
+    ...(attribution ? { attribution } : {}),
+  };
 }
 
 function pushHistory(

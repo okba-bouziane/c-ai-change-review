@@ -2,6 +2,17 @@
 
 ## 0.1.0 (unreleased)
 
+- Optional Claude Code hook integration (Set Up / Remove Claude Code Hooks, Hook Status):
+  PreToolUse/PostToolUse on Write|Edit|MultiEdit|NotebookEdit, UserPromptSubmit, and Stop,
+  added to `.claude/settings.local.json` after a preview, with a backup, preserving every
+  other setting and hook. The hook script always exits 0, prints nothing, and never stores
+  prompt text.
+- Attribution: changes are labeled as made by Claude, by Claude and then something else, or
+  not attributed. Rejecting a Claude edit restores the file as it was right before Claude
+  first edited it, so earlier changes by others survive. Git-ignored files Claude edits
+  become reviewable. A new prompt starts a fresh session when nothing is pending, and a
+  notification offers the review when Claude stops.
+
 - Batch review: Review All, Accept All (confirmation), and Reject All (preview with per-file
   selection, confirmation with counts by change kind, cancellable progress). Partial results
   are reported exactly; nothing is reported as done unless it was.

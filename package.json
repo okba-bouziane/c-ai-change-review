@@ -151,6 +151,22 @@
         "title": "End Review Session",
         "category": "Claude Review",
         "icon": "$(debug-stop)"
+      },
+      {
+        "command": "claudeReview.setupHooks",
+        "title": "Set Up Claude Code Hooks\u2026",
+        "category": "Claude Review",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "claudeReview.removeHooks",
+        "title": "Remove Claude Code Hooks\u2026",
+        "category": "Claude Review"
+      },
+      {
+        "command": "claudeReview.hookStatus",
+        "title": "Show Claude Code Hook Status",
+        "category": "Claude Review"
       }
     ],
     "menus": {
@@ -199,6 +215,11 @@
           "command": "claudeReview.endSession",
           "when": "view == claudeReview.changes && claudeReview.hasSession",
           "group": "z_more@2"
+        },
+        {
+          "command": "claudeReview.setupHooks",
+          "when": "view == claudeReview.changes",
+          "group": "z_more@4"
         },
         {
           "command": "claudeReview.showLog",
@@ -370,6 +391,16 @@
           "default": 30,
           "minimum": 0,
           "markdownDescription": "Ended review sessions older than this many days are deleted along with snapshots no other session uses."
+        },
+        "claudeReview.hooks.newSessionPerPrompt": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "With Claude Code hooks set up: start a new review session (fresh baseline) when you submit a prompt and nothing from the previous task is still pending. Pending changes are never hidden; the current session continues instead."
+        },
+        "claudeReview.hooks.notifyOnStop": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "With Claude Code hooks set up: show a notification when Claude finishes and changes are ready to review."
         }
       }
     }
@@ -387,7 +418,8 @@
     "test": "npm run test:unit && npm run test:integration",
     "check": "npm run typecheck && npm run lint && npm run format:check && npm run test:unit",
     "vscode:prepublish": "node esbuild.mjs --production",
-    "package": "vsce package --no-dependencies --allow-missing-repository"
+    "package": "vsce package --no-dependencies --allow-missing-repository",
+    "test:e2e": "vitest run --config vitest.e2e.config.mts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

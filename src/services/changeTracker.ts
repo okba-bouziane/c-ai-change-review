@@ -2,6 +2,7 @@ import type { GlobSet } from '../core/glob';
 import { inScope, normalizeRelPath, resolveInside, UnsafePathError } from '../core/paths';
 import { mapLimit } from '../core/pool';
 import {
+  attribute,
   classify,
   pairRenames,
   restoreBlocker,
@@ -108,13 +109,12 @@ export class ChangeTracker {
         const current = await this.cache.read(abs, signal);
         const kind = classify(baseline, current);
         if (kind) {
-          changes.push({
-            path: p,
-            kind,
-            baseline,
-            current,
-            ...withBlocker(restoreBlocker(baseline)),
-          });
+          changes.push(
+            attribute(
+              { path: p, kind, baseline, current, ...withBlocker(restoreBlocker(baseline)) },
+              session.attribution[p],
+            ),
+          );
         }
       },
       signal,
