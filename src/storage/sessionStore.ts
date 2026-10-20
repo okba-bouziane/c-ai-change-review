@@ -21,9 +21,44 @@ export class SessionStore {
     if (!isSessionData(data)) {
       return undefined;
     }
-    // Sessions written before review decisions existed have no `reviews` map.
-    const reviews = (data as Partial<SessionData>).reviews ?? {};
-    return { ...data, reviews };
+    // Sessions written by earlier versions may lack `reviews` and `history`.
+    const partial = data as Partial<SessionData>;
+    return { ...data, reviews: partial.reviews ?? {}, history: partial.history ?? [] };
+  }
+
+  /** All readable saved sessions. Unreadable files are ignored. */
+  async list(): Promise<SessionData[]> {
+    let names: string[];
+    try {
+      names = await fs.readdir(path.join(this.dir, 'sessions'));
+    } catch (e) {
+      if (isNotFound(e)) {
+        return [];
+      }
+      throw e;
+    }
+    const sessions: SessionData[] = [];
+    for (const name of names) {
+      const match = /^([A-Za-z0-9-]+)\.json$/.exec(name);
+      const session = match?.[1] ? await this.load(match[1]) : undefined;
+      if (session) {
+        sessions.push(session);
+      }
+    }
+    return sessions;
+  }
+
+  async delete(id: string): Promise<void> {
+    await fs.rm(this.sessionPath(id), { force: true });
+  }
+
+  async activeId(): Promise<string | undefined> {
+    const pointer = await readJson(this.activePath());
+    return typeof pointer === 'object' &&
+      pointer !== null &&
+      typeof (pointer as ActivePointer).id === 'string'
+      ? (pointer as ActivePointer).id
+      : undefined;
   }
 
   async setActive(id: string | undefined): Promise<void> {

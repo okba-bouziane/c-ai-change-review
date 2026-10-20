@@ -7,13 +7,16 @@ import { captureBaseline } from '../services/baseline';
 import { ChangeTracker } from '../services/changeTracker';
 import { isAbort } from '../services/fileState';
 import { Git } from '../services/git';
-import { readBaselineBytes } from '../services/restore';
 import {
-  acceptChange,
-  rejectChange,
-  type AcceptResult,
-  type RejectOutcome,
-} from '../services/review';
+  acceptMany,
+  rejectMany,
+  undoLast,
+  type ActionDeps,
+  type ActionOptions,
+  type ActionReport,
+} from '../services/actions';
+import { readBaselineBytes } from '../services/restore';
+import { applyRetention } from '../storage/retention';
 import type { SessionStore } from '../storage/sessionStore';
 import type { SnapshotStore } from '../storage/snapshotStore';
 import { readConfig, SECTION } from './config';
@@ -119,74 +122,177 @@ export class ReviewController implements vscode.Disposable {
     return readBaselineBytes(baseline, key, this.deps.snapshots, this.git);
   }
 
-  /** Accepts the pending change for key. The workspace is never modified. */
-  async accept(key: string): Promise<AcceptResult | undefined> {
+  /** True when there is a review action that can be undone. */
+  get canUndo(): boolean {
+    return (this.session?.history.length ?? 0) > 0;
+  }
+
+  /** Short description of the action Undo would reverse, e.g. "reject of 3 files". */
+  describeUndo(): string | undefined {
+    const entry = this.session?.history.at(-1);
+    if (!entry) {
+      return undefined;
+    }
+    const [first] = entry.items;
+    const what = entry.items.length === 1 && first ? first.key : `${entry.items.length} files`;
+    return `${entry.action === 'accept' ? 'Accept' : 'Reject'} of ${what}`;
+  }
+
+  /** Pending changes for the given keys, in the given order. */
+  pendingChanges(keys: readonly string[]): DetectedChange[] {
+    return keys.flatMap((k) => this.changes.filter((c) => c.path === k));
+  }
+
+  /** Accepts pending changes. The workspace is never modified. */
+  async accept(keys: readonly string[], options: ActionOptions = {}): Promise<ActionReport> {
+    return this.runAction(keys, (changes, deps) => acceptMany(changes, deps, options));
+  }
+
+  /** Rejects pending changes by restoring their baselines. */
+  async reject(keys: readonly string[], options: ActionOptions = {}): Promise<ActionReport> {
+    return this.runAction(keys, (changes, deps) => rejectMany(changes, deps, options));
+  }
+
+  /** Reverses the most recent accept or reject. Undefined when there is nothing to undo. */
+  async undo(): Promise<ActionReport | undefined> {
     return this.enqueue(async () => {
-      const change = this.changes.find((c) => c.path === key);
-      const session = this.session;
-      if (!change || !session) {
+      const deps = this.actionDeps();
+      if (!deps) {
         return undefined;
       }
-      const config = readConfig(this.deps.folder);
-      const result = await acceptChange(change, {
-        session,
-        store: this.deps.snapshots,
-        sensitive: config.sensitive,
-        limits: config.limits,
-      });
-      if (result.ok) {
-        this.deps.log.info(`Accepted ${change.kind} ${key}`);
-        await this.deps.sessions.save(session);
-      } else {
-        this.deps.log.warn(`Could not accept ${key}: ${result.message}`);
+      const report = await undoLast(deps);
+      if (report) {
+        this.logReport(report);
+        await this.afterAction(deps.session, report);
       }
-      await this.refresh();
-      return result;
+      return report;
     });
   }
 
-  /** Rejects the pending change for key by restoring its baseline. */
-  async reject(key: string): Promise<RejectOutcome | undefined> {
-    return this.enqueue(async () => {
-      const change = this.changes.find((c) => c.path === key);
-      const session = this.session;
-      if (!change || !session) {
-        return undefined;
-      }
-      const outcome = await rejectChange(change, {
-        session,
-        store: this.deps.snapshots,
-        git: this.git,
-        removeFile: moveToTrash,
-      });
-      for (const r of outcome.results) {
-        const line = `Reject ${r.path}: ${r.outcome}${r.message ? ` (${r.message})` : ''}`;
-        if (r.outcome === 'failed' || r.outcome === 'blocked' || r.outcome === 'conflict') {
-          this.deps.log.warn(line);
-        } else {
-          this.deps.log.info(line);
-        }
-      }
-      if (outcome.record) {
-        await this.deps.sessions.save(session);
-      } else {
-        session.log.push({
-          at: new Date().toISOString(),
-          level: 'warning',
-          path: key,
-          message: outcome.results.map((r) => `${r.path}: ${r.outcome}`).join(', '),
-        });
-        await this.deps.sessions.save(session);
-      }
-      for (const r of outcome.results) {
-        const abs = this.absolutePath(r.path);
-        if (abs) {
-          this.tracker?.invalidate(abs);
-        }
-      }
-      await this.refresh();
-      return outcome;
+  /**
+   * Stops reviewing: the session is kept on disk (subject to retention) but is no longer
+   * active, and no changes are listed. Files are not modified.
+   */
+  async endSession(): Promise<void> {
+    await this.enqueue(async () => {
+      this.cancelRunning();
+      const ended = this.session;
+      this.session = undefined;
+      this.tracker = undefined;
+      this.git = undefined;
+      this.changes = [];
+      await this.deps.sessions.setActive(undefined);
+      await this.cleanUp(undefined);
+      this.deps.log.info(`Ended review session ${ended?.id ?? ''}`);
+      this.changeEmitter.fire([]);
     });
+  }
+
+  private async runAction(
+    keys: readonly string[],
+    run: (changes: DetectedChange[], deps: ActionDeps) => Promise<ActionReport>,
+  ): Promise<ActionReport> {
+    return this.enqueue(async () => {
+      const deps = this.actionDeps();
+      const changes = this.pendingChanges(keys);
+      const found = new Set(changes.map((c) => c.path));
+      const missing = keys.filter((k) => !found.has(k));
+      const report = deps
+        ? await run(changes, deps)
+        : {
+            action: 'accept' as const,
+            succeeded: [],
+            conflicts: [],
+            blocked: [],
+            failed: [],
+            cancelled: [],
+          };
+      // Keys that are no longer pending were changed or decided elsewhere since the user looked.
+      report.conflicts.push(
+        ...missing.map((key) => ({ key, message: 'No longer has a pending change.' })),
+      );
+      this.logReport(report);
+      if (deps) {
+        await this.afterAction(deps.session, report);
+      }
+      return report;
+    });
+  }
+
+  private actionDeps(): ActionDeps | undefined {
+    const session = this.session;
+    if (!session) {
+      return undefined;
+    }
+    const config = readConfig(this.deps.folder);
+    return {
+      session,
+      store: this.deps.snapshots,
+      git: this.git,
+      sensitive: config.sensitive,
+      limits: config.limits,
+      removeFile: moveToTrash,
+    };
+  }
+
+  private async afterAction(session: SessionData, report: ActionReport): Promise<void> {
+    const problems = [...report.conflicts, ...report.blocked, ...report.failed];
+    for (const p of problems) {
+      session.log.push({
+        at: new Date().toISOString(),
+        level: 'warning',
+        path: p.key,
+        message: `${report.action}: ${p.message}`,
+      });
+    }
+    await this.deps.sessions.save(session);
+    for (const key of [...report.succeeded, ...problems.map((p) => p.key)]) {
+      const abs = this.absolutePath(key);
+      if (abs) {
+        this.tracker?.invalidate(abs);
+      }
+    }
+    await this.refresh();
+  }
+
+  private logReport(report: ActionReport): void {
+    const { log } = this.deps;
+    if (report.succeeded.length > 0) {
+      log.info(
+        `${report.action}: ${report.succeeded.length} succeeded (${report.succeeded.join(', ')})`,
+      );
+    }
+    for (const [label, issues] of [
+      ['conflict', report.conflicts],
+      ['blocked', report.blocked],
+      ['failed', report.failed],
+    ] as const) {
+      for (const issue of issues) {
+        log.warn(`${report.action} ${label}: ${issue.key}: ${issue.message}`);
+      }
+    }
+    if (report.cancelled.length > 0) {
+      log.info(`${report.action}: cancelled before ${report.cancelled.length} files`);
+    }
+  }
+
+  private async cleanUp(activeId: string | undefined): Promise<void> {
+    try {
+      const policy = readConfig(this.deps.folder).retention;
+      const result = await applyRetention(
+        this.deps.sessions,
+        this.deps.snapshots,
+        policy,
+        activeId,
+      );
+      if (result.sessionsDeleted > 0 || result.snapshotsDeleted > 0) {
+        this.deps.log.info(
+          `Cleanup: removed ${result.sessionsDeleted} old sessions and ${result.snapshotsDeleted} unused snapshots`,
+        );
+      }
+    } catch (e) {
+      this.deps.log.warn(`Cleanup failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   private enqueue<T>(action: () => Promise<T>): Promise<T> {
@@ -199,6 +305,7 @@ export class ReviewController implements vscode.Disposable {
   async initialize(): Promise<void> {
     const existing = await this.deps.sessions.loadActive();
     if (existing?.workspaceFolder === this.deps.folder.uri.fsPath) {
+      await this.cleanUp(existing.id);
       await this.adopt(existing);
       this.deps.log.info(`Resumed review session ${existing.id} (${existing.mode} mode)`);
     } else if (readConfig(this.deps.folder).autoTrack) {
@@ -227,6 +334,7 @@ export class ReviewController implements vscode.Disposable {
     );
     await this.deps.sessions.save(session);
     await this.deps.sessions.setActive(session.id);
+    await this.cleanUp(session.id);
     const captured = Object.keys(session.baselines).length;
     this.deps.log.info(
       `Started review session ${session.id} (${session.mode} mode, root ${session.root}, ` +

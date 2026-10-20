@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { GlobSet } from '../core/glob';
 import type { CaptureLimits } from '../services/baseline';
+import type { RetentionPolicy } from '../storage/retention';
 
 export const SECTION = 'claudeReview';
 
@@ -11,6 +12,7 @@ export interface ReviewConfig {
   readonly exclude: GlobSet;
   readonly sensitive: GlobSet;
   readonly limits: CaptureLimits;
+  readonly retention: RetentionPolicy;
 }
 
 const MB = 1024 * 1024;
@@ -27,6 +29,10 @@ export function readConfig(scope?: vscode.ConfigurationScope): ReviewConfig {
       maxFileSize: Math.max(0, c.get<number>('snapshot.maxFileSizeMB', 5)) * MB,
       maxTotalSize: Math.max(0, c.get<number>('snapshot.maxTotalSizeMB', 200)) * MB,
       maxFiles: Math.max(1, c.get<number>('filesystemMode.maxFiles', 20000)),
+    },
+    retention: {
+      maxSessions: Math.max(0, c.get<number>('retention.maxEndedSessions', 5)),
+      maxAgeDays: Math.max(0, c.get<number>('retention.maxAgeDays', 30)),
     },
   };
 }

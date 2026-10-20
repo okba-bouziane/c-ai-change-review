@@ -64,6 +64,25 @@ export interface SessionData {
   readonly log: SessionLogEntry[];
   /** Review decisions keyed by root-relative path (the new path for renames). */
   readonly reviews: Record<string, ReviewRecord>;
+  /** Review actions that can be undone, oldest first. */
+  readonly history: HistoryEntry[];
+}
+
+/** One undoable user action: a single decision or a whole Accept All / Reject All. */
+export interface HistoryEntry {
+  readonly id: string;
+  readonly at: string;
+  readonly action: 'accept' | 'reject';
+  readonly items: HistoryItem[];
+}
+
+export interface HistoryItem {
+  readonly key: string;
+  readonly record: ReviewRecord;
+  /** The decision this one replaced, restored on undo. */
+  readonly previous?: ReviewRecord;
+  /** For renames: the decision recorded on the old path, if any. */
+  readonly oldPrevious?: ReviewRecord;
 }
 
 /**
@@ -214,4 +233,49 @@ function push<K, V>(map: Map<K, V[]>, key: K, value: V): void {
   } else {
     map.set(key, [value]);
   }
+}
+
+/**
+ * The stateToken() a file has when it matches this baseline, or undefined when the baseline's
+ * bytes are unknown (so a file cannot be verified against it).
+ */
+export function baselineToken(b: Baseline): string | undefined {
+  switch (b.type) {
+    case 'absent':
+      return 'absent';
+    case 'stored':
+      return `file:${b.hash}:${b.mode.toString(8)}`;
+    case 'git':
+      return b.hash === undefined ? undefined : `file:${b.hash}:${b.mode.toString(8)}`;
+    case 'unavailable':
+      return undefined;
+  }
+}
+
+/** Every snapshot-store hash a session still needs. */
+export function referencedHashes(session: SessionData): Set<Sha256> {
+  const hashes = new Set<Sha256>();
+  const add = (b: Baseline | undefined): void => {
+    if (b?.type === 'stored') {
+      hashes.add(b.hash);
+    }
+  };
+  const addRecord = (r: ReviewRecord | undefined): void => {
+    if (r) {
+      add(r.before);
+      add(r.after);
+      add(r.oldBefore);
+      add(r.oldAfter);
+    }
+  };
+  Object.values(session.baselines).forEach(add);
+  Object.values(session.reviews).forEach(addRecord);
+  for (const entry of session.history) {
+    for (const item of entry.items) {
+      addRecord(item.record);
+      addRecord(item.previous);
+      addRecord(item.oldPrevious);
+    }
+  }
+  return hashes;
 }

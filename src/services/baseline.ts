@@ -108,6 +108,7 @@ export async function captureBaseline(
     baselines,
     log,
     reviews: {},
+    history: [],
   };
   return { session, git };
 }

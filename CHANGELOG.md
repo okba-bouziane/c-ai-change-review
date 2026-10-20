@@ -2,6 +2,15 @@
 
 ## 0.1.0 (unreleased)
 
+- Batch review: Review All, Accept All (confirmation), and Reject All (preview with per-file
+  selection, confirmation with counts by change kind, cancellable progress). Partial results
+  are reported exactly; nothing is reported as done unless it was.
+- Undo Last Review Action: reverses the last accept/reject (a batch counts as one action).
+  Undoing a reject only writes files that are still exactly as the reject left them.
+- End Review Session, a status bar pending count, and welcome views for "no session".
+- Session persistence with undo history across reloads; retention of ended sessions and
+  cleanup of unused snapshots.
+
 - Diff review: native side-by-side diffs against the review baseline (read-only left side),
   with clear placeholders for added, deleted, binary, and uncaptured files.
 - Per-file Accept (keeps content, moves the baseline forward, never stages or commits) and

@@ -18,6 +18,8 @@ export interface ClaudeReviewInternals {
   readonly controller: ReviewController | undefined;
   /** Resolves once the initial session has been loaded or captured. */
   readonly ready: Promise<void>;
+  /** Extension storage directory for this workspace, if any. */
+  readonly storageDir: string | undefined;
 }
 
 export function activate(context: vscode.ExtensionContext): ClaudeReviewInternals {
@@ -74,7 +76,7 @@ export function activate(context: vscode.ExtensionContext): ClaudeReviewInternal
         controller ? (b, key) => controller.readBaseline(b, key) : undefined,
       ),
     ),
-    ...registerReviewCommands(controller, changes),
+    ...registerReviewCommands(controller, changes, log),
   );
 
   const ready = (controller?.initialize() ?? Promise.resolve()).catch((e: unknown) => {
@@ -118,7 +120,7 @@ export function activate(context: vscode.ExtensionContext): ClaudeReviewInternal
   );
 
   log.info(`Activated (workspace: ${folder?.uri.fsPath ?? 'none'})`);
-  return { changes, controller, ready };
+  return { changes, controller, ready, storageDir: context.storageUri?.fsPath };
 }
 
 export function deactivate(): void {

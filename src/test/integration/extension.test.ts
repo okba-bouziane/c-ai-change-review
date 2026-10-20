@@ -4,6 +4,9 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { ChangedFile } from '../../core/types';
 import type { ClaudeReviewInternals } from '../../extension/extension';
+import { ReviewController } from '../../extension/reviewController';
+import { SessionStore } from '../../storage/sessionStore';
+import { SnapshotStore } from '../../storage/snapshotStore';
 
 const EXTENSION_ID = 'local.claude-review';
 
@@ -165,6 +168,98 @@ suite('Claude Review extension', () => {
 
       await vscode.commands.executeCommand('claudeReview.rejectFile', fileFor('keep.txt'));
       assert.equal(await fs.readFile(path.join(folder, 'keep.txt'), 'utf8'), 'precious\n');
+    });
+  });
+
+  suite('batch actions, undo, and recovery', () => {
+    let folder: string;
+    const fileFor = (rel: string): ChangedFile | undefined =>
+      internals.changes.getChanges().find((f) => f.path === rel);
+    const write = (rel: string, text: string): Promise<void> =>
+      fs.writeFile(path.join(folder, rel), text);
+    const readFile = (rel: string): Promise<string> => fs.readFile(path.join(folder, rel), 'utf8');
+
+    suiteSetup(() => {
+      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      assert.ok(root);
+      folder = root;
+    });
+
+    test('reject all, then undo, round-trips every file', async () => {
+      const controller = internals.controller;
+      assert.ok(controller);
+      await write('batch-1.txt', 'one\n');
+      await write('batch-2.txt', 'two\n');
+      assert.ok(
+        await waitFor(
+          () => fileFor('batch-1.txt') !== undefined && fileFor('batch-2.txt') !== undefined,
+        ),
+      );
+      await controller.accept(['batch-1.txt', 'batch-2.txt']);
+      await write('batch-1.txt', 'one changed\n');
+      await write('batch-2.txt', 'two changed\n');
+      assert.ok(
+        await waitFor(
+          () =>
+            fileFor('batch-1.txt')?.status === 'pending' &&
+            fileFor('batch-2.txt')?.status === 'pending',
+        ),
+      );
+
+      const report = await controller.reject(['batch-1.txt', 'batch-2.txt']);
+      assert.deepEqual([...report.succeeded].sort(), ['batch-1.txt', 'batch-2.txt']);
+      assert.equal(await readFile('batch-1.txt'), 'one\n');
+      assert.equal(await readFile('batch-2.txt'), 'two\n');
+      assert.equal(controller.describeUndo(), 'Reject of 2 files');
+
+      const undone = await controller.undo();
+      assert.equal(undone?.succeeded.length, 2);
+      assert.equal(await readFile('batch-1.txt'), 'one changed\n');
+      assert.equal(await readFile('batch-2.txt'), 'two changed\n');
+      assert.equal(fileFor('batch-1.txt')?.status, 'pending');
+    });
+
+    test('a new controller on the same storage resumes the session (reload)', async () => {
+      const controller = internals.controller;
+      const storageDir = internals.storageDir;
+      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+      assert.ok(controller?.activeSession && storageDir && workspaceFolder);
+      const before = controller.activeSession;
+      const pendingBefore = controller.detectedChanges.map((c) => c.path).sort();
+
+      const log = vscode.window.createOutputChannel('Claude Review test', { log: true });
+      const resumed = new ReviewController({
+        folder: workspaceFolder,
+        sessions: new SessionStore(storageDir),
+        snapshots: new SnapshotStore(path.join(storageDir, 'snapshots')),
+        log,
+        viewId: 'claudeReview.changes',
+        gitPath: undefined,
+      });
+      try {
+        await resumed.initialize();
+        assert.equal(resumed.activeSession?.id, before.id);
+        assert.deepEqual(resumed.detectedChanges.map((c) => c.path).sort(), pendingBefore);
+        assert.equal(resumed.describeUndo(), controller.describeUndo());
+      } finally {
+        resumed.dispose();
+        log.dispose();
+      }
+    });
+
+    test('ending the session clears the list without touching files', async () => {
+      const controller = internals.controller;
+      assert.ok(controller);
+      const pending = internals.changes.getChanges().length;
+      assert.ok(pending > 0);
+      await controller.endSession();
+      assert.equal(controller.activeSession, undefined);
+      assert.equal(internals.changes.getChanges().length, 0);
+      assert.equal(await readFile('batch-1.txt'), 'one changed\n');
+
+      await controller.startSession();
+      assert.ok(controller.activeSession);
+      assert.equal(internals.changes.getChanges().length, 0, 'new baseline includes current files');
     });
   });
 });

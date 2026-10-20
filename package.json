@@ -53,8 +53,13 @@
     "viewsWelcome": [
       {
         "view": "claudeReview.changes",
-        "contents": "No changes to review.\nFiles changed by Claude Code in this workspace will appear here, grouped by Added, Modified, Deleted, and Renamed.\n[Refresh](command:claudeReview.refresh)",
-        "when": "workspaceFolderCount > 0"
+        "contents": "No changes to review.\nFiles changed in this workspace after the review session started (by Claude Code or anything else) appear here, grouped by Added, Modified, Deleted, and Renamed.\n[Refresh](command:claudeReview.refresh)",
+        "when": "workspaceFolderCount > 0 && claudeReview.hasSession"
+      },
+      {
+        "view": "claudeReview.changes",
+        "contents": "No review session is active.\nStarting a session records the current state of the workspace, including uncommitted work, as the baseline that later changes are compared against. No files are modified.\n[Start Review Session](command:claudeReview.startSession)",
+        "when": "workspaceFolderCount > 0 && !claudeReview.hasSession"
       },
       {
         "view": "claudeReview.changes",
@@ -116,19 +121,64 @@
         "title": "Filter by Review Status\u2026",
         "category": "Claude Review",
         "icon": "$(filter)"
+      },
+      {
+        "command": "claudeReview.reviewAll",
+        "title": "Review All",
+        "category": "Claude Review",
+        "icon": "$(preview)"
+      },
+      {
+        "command": "claudeReview.acceptAll",
+        "title": "Accept All",
+        "category": "Claude Review",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "claudeReview.rejectAll",
+        "title": "Reject All\u2026",
+        "category": "Claude Review",
+        "icon": "$(close-all)"
+      },
+      {
+        "command": "claudeReview.undo",
+        "title": "Undo Last Review Action",
+        "category": "Claude Review",
+        "icon": "$(history)"
+      },
+      {
+        "command": "claudeReview.endSession",
+        "title": "End Review Session",
+        "category": "Claude Review",
+        "icon": "$(debug-stop)"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "claudeReview.reviewNext",
-          "when": "view == claudeReview.changes",
+          "command": "claudeReview.reviewAll",
+          "when": "view == claudeReview.changes && claudeReview.hasPending",
+          "group": "navigation@0"
+        },
+        {
+          "command": "claudeReview.acceptAll",
+          "when": "view == claudeReview.changes && claudeReview.hasPending",
           "group": "navigation@1"
+        },
+        {
+          "command": "claudeReview.rejectAll",
+          "when": "view == claudeReview.changes && claudeReview.hasPending",
+          "group": "navigation@2"
+        },
+        {
+          "command": "claudeReview.undo",
+          "when": "view == claudeReview.changes && claudeReview.canUndo",
+          "group": "navigation@3"
         },
         {
           "command": "claudeReview.filter",
           "when": "view == claudeReview.changes",
-          "group": "navigation@2"
+          "group": "navigation@4"
         },
         {
           "command": "claudeReview.refresh",
@@ -136,14 +186,24 @@
           "group": "navigation@9"
         },
         {
+          "command": "claudeReview.reviewNext",
+          "when": "view == claudeReview.changes && claudeReview.hasPending",
+          "group": "z_more@0"
+        },
+        {
           "command": "claudeReview.startSession",
           "when": "view == claudeReview.changes",
-          "group": "z_more@0"
+          "group": "z_more@1"
+        },
+        {
+          "command": "claudeReview.endSession",
+          "when": "view == claudeReview.changes && claudeReview.hasSession",
+          "group": "z_more@2"
         },
         {
           "command": "claudeReview.showLog",
           "when": "view == claudeReview.changes",
-          "group": "z_more@1"
+          "group": "z_more@3"
         }
       ],
       "view/item/context": [
@@ -212,6 +272,22 @@
         {
           "command": "claudeReview.openFile",
           "when": "false"
+        },
+        {
+          "command": "claudeReview.undo",
+          "when": "claudeReview.canUndo"
+        },
+        {
+          "command": "claudeReview.endSession",
+          "when": "claudeReview.hasSession"
+        },
+        {
+          "command": "claudeReview.acceptAll",
+          "when": "claudeReview.hasPending"
+        },
+        {
+          "command": "claudeReview.rejectAll",
+          "when": "claudeReview.hasPending"
         }
       ]
     },
@@ -282,6 +358,18 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "After accepting or rejecting from a diff editor, close it and open the next pending file."
+        },
+        "claudeReview.retention.maxEndedSessions": {
+          "type": "number",
+          "default": 5,
+          "minimum": 0,
+          "markdownDescription": "How many ended review sessions (and their snapshots) to keep for recovery. The active session is always kept."
+        },
+        "claudeReview.retention.maxAgeDays": {
+          "type": "number",
+          "default": 30,
+          "minimum": 0,
+          "markdownDescription": "Ended review sessions older than this many days are deleted along with snapshots no other session uses."
         }
       }
     }

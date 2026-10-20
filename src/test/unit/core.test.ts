@@ -170,7 +170,7 @@ describe('SessionStore', () => {
     // Written without `reviews`, like a session saved by an earlier version.
     await store.save({ ...session, baselines: { ...session.baselines }, log: [] } as never);
     await store.setActive('abc-123');
-    expect(await store.loadActive()).toEqual({ ...session, reviews: {} });
+    expect(await store.loadActive()).toEqual({ ...session, reviews: {}, history: [] });
     await expect(store.load('../evil')).rejects.toThrow(/Invalid session id/);
   });
 });
