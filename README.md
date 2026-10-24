@@ -1,12 +1,12 @@
-# c-extensions
+# c-ai-change-review
 
 VS Code extension **Claude Review**: review the changes an AI coding agent makes, file by file.
 
 ## Quick start (run it)
 
 ```bash
-git clone https://github.com/okba-bouziane/c-extensions.git
-cd c-extensions
+git clone https://github.com/okba-bouziane/c-ai-change-review.git
+cd c-ai-change-review
 npm install
 npm run build
 ```
