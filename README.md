@@ -1,4 +1,22 @@
-# Claude Review
+# c-extensions
+
+VS Code extension **Claude Review**: review the changes an AI coding agent makes, file by file.
+
+## Quick start (run it)
+
+```bash
+git clone https://github.com/okba-bouziane/c-extensions.git
+cd c-extensions
+npm install
+npm run build
+```
+
+Then open the folder in VS Code and press <kbd>F5</kbd> ("Run Extension"). A new VS Code window opens with the
+**Claude Review** panel in the Activity Bar. To install it for good instead, run `npm run package` and
+`code --install-extension claude-review-0.1.0.vsix`.
+
+## What it does
+
 
 Review, accept, and reject the file changes Claude Code makes in your workspace, using
 VS Code's native diff editor. Claude Review works alongside the official Claude Code
